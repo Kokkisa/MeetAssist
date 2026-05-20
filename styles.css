@@ -243,3 +243,102 @@ html, body {
   font-size:  11px;
   padding:    4px 0;
 }
+
+/* ── SETTINGS BAR ─────────────────────────────────────── */
+#settings-bar {
+  background:   rgba(15, 15, 25, 0.95);
+  border-top:   1px solid var(--border);
+  padding:      8px 10px;
+  flex-shrink:  0;
+}
+#settings-bar.hidden { display: none; }
+
+.settings-row {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+}
+.settings-row label {
+  font-size:   11px;
+  color:       var(--text-secondary);
+  white-space: nowrap;
+}
+.settings-row input {
+  flex:          1;
+  background:    var(--bg-input);
+  border:        1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color:         var(--text-primary);
+  font-size:     11px;
+  padding:       4px 8px;
+  outline:       none;
+}
+.settings-row input:focus { border-color: rgba(79,142,247,0.50); }
+#btn-save-settings {
+  background:    var(--bg-btn);
+  border:        none;
+  border-radius: var(--radius-sm);
+  color:         #fff;
+  font-size:     11px;
+  padding:       4px 10px;
+  cursor:        pointer;
+}
+#btn-save-settings:hover { background: var(--bg-btn-hover); }
+
+/* ── RECORD CONTROLS ──────────────────────────────────── */
+#record-controls {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  -webkit-app-region: no-drag;
+}
+.start-btn {
+  background:    rgba(0, 200, 100, 0.20);
+  border:        1px solid rgba(0, 200, 100, 0.40);
+  border-radius: 12px;
+  color:         #00c864;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       4px 12px;
+  cursor:        pointer;
+  transition:    all 0.15s;
+}
+.start-btn:hover  { background: rgba(0, 200, 100, 0.35); }
+.start-btn.active {
+  background: rgba(255, 60, 60, 0.20);
+  border-color: rgba(255, 60, 60, 0.40);
+  color: #ff4f4f;
+}
+#rec-indicator {
+  display:     flex;
+  align-items: center;
+  gap:         5px;
+}
+#rec-indicator.hidden { display: none; }
+.rec-dot {
+  width:         7px;
+  height:        7px;
+  border-radius: 50%;
+  background:    #ff4f4f;
+  animation:     pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+#rec-timer {
+  font-size:   10px;
+  color:       var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── TRANSCRIPT LINE ──────────────────────────────────── */
+.transcript-line {
+  padding:       2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 3px;
+  font-size:     12px;
+  line-height:   1.6;
+  color:         var(--text-primary);
+  user-select:   text;   /* allow text selection for context bar */
+}

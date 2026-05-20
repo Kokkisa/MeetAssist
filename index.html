@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+        content="default-src 'self';
+                 script-src 'self';
+                 style-src 'self' 'unsafe-inline';
+                 connect-src https://api.openai.com;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MeetAssist</title>
   <link rel="stylesheet" href="styles.css">
@@ -16,10 +19,27 @@
       <span class="dot"></span>
       MeetAssist
     </div>
+    <div id="record-controls">
+      <div id="rec-indicator" class="hidden">
+        <span class="rec-dot"></span>
+        <span id="rec-timer">00:00</span>
+      </div>
+      <button id="btn-start-stop" class="start-btn">▶ Start</button>
+    </div>
     <div id="win-controls">
+      <button class="ctrl-btn" id="btn-settings"  title="Settings">⚙</button>
       <button class="ctrl-btn" id="btn-minimise" title="Minimise">─</button>
       <button class="ctrl-btn" id="btn-hide"     title="Hide (Ctrl+Shift+M to show)">◱</button>
       <button class="ctrl-btn danger" id="btn-close" title="Close">✕</button>
+    </div>
+  </div>
+
+  <!-- ── SETTINGS BAR — collapsible, hidden by default ───── -->
+  <div id="settings-bar" class="hidden">
+    <div class="settings-row">
+      <label for="input-api-key">OpenAI API Key</label>
+      <input type="password" id="input-api-key" placeholder="sk-..." autocomplete="off" />
+      <button id="btn-save-settings">Save</button>
     </div>
   </div>
 

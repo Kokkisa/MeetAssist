@@ -2,7 +2,7 @@
 const TOGGLE_HOTKEY = 'CommandOrControl+Shift+M'; // Show/hide overlay
 // ──────────────────────────────────────────────────────────────────────────────
 
-const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer } = require('electron');
 const path = require('path');
 
 let mainWindow = null;
@@ -38,13 +38,13 @@ function createWindow() {
   });
 
   // Hide from screen share — critical stealth feature
-  mainWindow.setContentProtection(true);
+  // mainWindow.setContentProtection(true);  // re-enable before shipping
 
   // Load the UI
   mainWindow.loadFile('index.html');
 
   // Open DevTools in dev — comment out before shipping
-  // mainWindow.webContents.openDevTools({ mode: 'detach' });
+  mainWindow.webContents.openDevTools({ mode: 'detach' });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -70,6 +70,13 @@ app.whenReady().then(() => {
 ipcMain.on('win-close',   () => { if (mainWindow) mainWindow.close(); });
 ipcMain.on('win-hide',    () => { if (mainWindow) mainWindow.hide();  });
 ipcMain.on('win-minimise',() => { if (mainWindow) mainWindow.minimize(); });
+
+// IPC — desktop capturer screen-source list (LCA audio-capture pattern).
+// Renderer picks sources[0] and feeds its id into getUserMedia.
+ipcMain.handle('get-desktop-sources', async () => {
+  const sources = await desktopCapturer.getSources({ types: ['screen'] });
+  return sources.map(s => ({ id: s.id, name: s.name }));
+});
 
 // Quit when all windows closed (Windows/Linux)
 app.on('window-all-closed', () => {

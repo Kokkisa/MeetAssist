@@ -1,665 +1,527 @@
-# CLAUDE.md — MeetAssist v0.1.0 (Block 1)
+# CLAUDE.md — MeetAssist Block 2 (v0.2.0)
 
-## What is MeetAssist
+## Context
 
-MeetAssist is a stealth desktop overlay app for Zoom / Google Meet users.
-It continuously transcribes live meeting audio, displays a live scrolling
-transcript, and lets the user select any portion of the transcript to ask
-the AI a question about. The AI answer streams on screen only when the
-user explicitly requests it.
+Block 1 is complete and pushed as v0.1.0.
+The overlay window works. All 6 files exist and are correct.
+Repo: https://github.com/Kokkisa/MeetAssist
 
-This is a BRAND NEW repo — not related to LiveCallAssistant.
-Do not copy LiveCallAssistant code. Build fresh from scratch.
-
-Repo: https://github.com/Kokkisa/MeetAssist (empty, just initialized)
+Read ALL existing source files before touching anything.
+Build Block 2 features on top of Block 1. Do NOT rewrite or restructure Block 1 code.
 
 ---
 
-## Block 1 Goal
+## Block 2 Goal
 
-Stand up the Electron shell with a working overlay window.
-Nothing else. No audio. No transcription. No AI.
-Just the window, the layout skeleton, and the git foundation.
+Capture system audio (what the user hears — Zoom/Meet output) continuously.
+Chunk it every 5 seconds and send to OpenAI Whisper for transcription.
+Append each transcribed chunk as a new line in the transcript panel.
+Add a Start/Stop recording button to the header.
 
-Block 1 is done when:
-- `npm start` opens a transparent, always-on-top overlay window
-- The window has the correct layout skeleton (3 panels — transcript, context, answer)
-- The window is hidden from screen share (setContentProtection)
-- The app can be quit cleanly
-- Everything is committed and pushed to github.com/Kokkisa/MeetAssist
+Block 2 is done when:
+- User clicks Start → app begins capturing system audio
+- Every ~5 seconds a new transcript line appears in the transcript panel
+- User clicks Stop → capture ends, transcript stays on screen
+- All data persists in memory during the session (no disk write yet — that is Block 6)
+- Committed and pushed as v0.2.0
 
 ---
 
-## Step 1 — Initialize the project
+## Architecture
 
-Run these commands in sequence:
-
-```bash
-# Create project folder
-mkdir MeetAssist
-cd MeetAssist
-
-# Initialize npm
-npm init -y
-
-# Install Electron
-npm install --save-dev electron
-
-# Install electron-builder for packaging later
-npm install --save-dev electron-builder
+```
+System Audio (WASAPI loopback)
+    ↓
+desktopCapturer (Electron main process)
+    ↓ IPC (audio-chunk ArrayBuffer)
+renderer process
+    ↓
+OpenAI Whisper API (audio/transcriptions)
+    ↓
+Append line to #transcript-body
 ```
 
----
-
-## Step 2 — Create package.json
-
-Replace the auto-generated package.json with this exact content:
-
-```json
-{
-  "name": "meetassist",
-  "version": "0.1.0",
-  "description": "Stealth meeting assistant — live transcript, selective AI answers",
-  "main": "main.js",
-  "scripts": {
-    "start": "electron .",
-    "build": "electron-builder"
-  },
-  "build": {
-    "appId": "com.kokkisa.meetassist",
-    "productName": "MeetAssist",
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": false
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "renderer.js",
-      "index.html",
-      "styles.css",
-      "assets/**"
-    ]
-  },
-  "devDependencies": {
-    "electron": "^29.0.0",
-    "electron-builder": "^24.0.0"
-  }
-}
-```
+All audio capture happens in the RENDERER process using the Web Audio API
+via desktopCapturer — same proven pattern as LiveCallAssistant v0.1.0.
+Do NOT use native modules. Do NOT use node-record-lpcm16 or any npm audio package.
 
 ---
 
-## Step 3 — Create assets folder
+## Step 1 — Add OpenAI API key setting (stored in localStorage)
 
-```bash
-mkdir assets
-```
+MeetAssist needs the user's OpenAI API key for Whisper.
+Store it in localStorage. Add a simple settings toggle to the header.
 
-Create a placeholder icon file — a simple 1x1 pixel .ico is fine for Block 1.
-If no icon is available, skip it and remove the "icon" line from package.json build config.
-The app will use the default Electron icon — that is acceptable for Block 1.
-
----
-
-## Step 4 — Create main.js
-
-```javascript
-// ─── CONFIGURABLE ─────────────────────────────────────────────────────────────
-const TOGGLE_HOTKEY = 'CommandOrControl+Shift+M'; // Show/hide overlay
-// ──────────────────────────────────────────────────────────────────────────────
-
-const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
-const path = require('path');
-
-let mainWindow = null;
-
-// Window dimensions
-const WIN_WIDTH  = 420;
-const WIN_HEIGHT = 640;
-
-function createWindow() {
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-
-  mainWindow = new BrowserWindow({
-    width:  WIN_WIDTH,
-    height: WIN_HEIGHT,
-
-    // Position — bottom-right corner, 20px margin
-    x: sw - WIN_WIDTH  - 20,
-    y: sh - WIN_HEIGHT - 20,
-
-    // Overlay behaviour
-    frame:           false,   // no title bar
-    transparent:     true,    // transparent background
-    alwaysOnTop:     true,    // stays above Zoom/Meet
-    resizable:       true,    // user can resize
-    skipTaskbar:     false,   // show in taskbar so user can find it
-    hasShadow:       false,
-
-    webPreferences: {
-      preload:            path.join(__dirname, 'preload.js'),
-      contextIsolation:   true,
-      nodeIntegration:    false,
-    }
-  });
-
-  // Hide from screen share — critical stealth feature
-  mainWindow.setContentProtection(true);
-
-  // Load the UI
-  mainWindow.loadFile('index.html');
-
-  // Open DevTools in dev — comment out before shipping
-  // mainWindow.webContents.openDevTools({ mode: 'detach' });
-
-  mainWindow.on('closed', () => { mainWindow = null; });
-}
-
-app.whenReady().then(() => {
-  createWindow();
-
-  // Toggle overlay visibility with hotkey
-  if (!globalShortcut.isRegistered(TOGGLE_HOTKEY)) {
-    globalShortcut.register(TOGGLE_HOTKEY, () => {
-      if (!mainWindow) return;
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    });
-  }
-});
-
-// IPC — window controls from renderer
-ipcMain.on('win-close',   () => { if (mainWindow) mainWindow.close(); });
-ipcMain.on('win-hide',    () => { if (mainWindow) mainWindow.hide();  });
-ipcMain.on('win-minimise',() => { if (mainWindow) mainWindow.minimize(); });
-
-// Quit when all windows closed (Windows/Linux)
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-
-// Clean up hotkeys on quit
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-});
-```
-
----
-
-## Step 5 — Create preload.js
-
-```javascript
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('meetAPI', {
-  // Window controls
-  close:    () => ipcRenderer.send('win-close'),
-  hide:     () => ipcRenderer.send('win-hide'),
-  minimise: () => ipcRenderer.send('win-minimise'),
-});
-```
-
----
-
-## Step 6 — Create index.html
-
-The layout has 4 sections stacked vertically:
-1. Header bar — app name + window controls
-2. Transcript panel — live scrolling text (empty for now, placeholder text)
-3. Context bar — selected text + user question input
-4. Answer panel — AI answer streams here
+### Add to index.html — settings row below header:
 
 ```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MeetAssist</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-
-  <!-- ── HEADER ─────────────────────────────────────────── -->
-  <div id="header">
-    <div id="app-name">
-      <span class="dot"></span>
-      MeetAssist
-    </div>
-    <div id="win-controls">
-      <button class="ctrl-btn" id="btn-minimise" title="Minimise">─</button>
-      <button class="ctrl-btn" id="btn-hide"     title="Hide (Ctrl+Shift+M to show)">◱</button>
-      <button class="ctrl-btn danger" id="btn-close" title="Close">✕</button>
-    </div>
+<!-- Settings bar — collapsible, hidden by default -->
+<div id="settings-bar" class="hidden">
+  <div class="settings-row">
+    <label for="input-api-key">OpenAI API Key</label>
+    <input type="password" id="input-api-key" placeholder="sk-..." autocomplete="off" />
+    <button id="btn-save-settings">Save</button>
   </div>
-
-  <!-- ── TRANSCRIPT PANEL ───────────────────────────────── -->
-  <div id="transcript-panel">
-    <div id="transcript-header">
-      <span class="panel-label">📝 Live Transcript</span>
-      <div id="transcript-controls">
-        <button class="small-btn" id="btn-clear-transcript" title="Clear transcript">Clear</button>
-        <button class="small-btn" id="btn-save-transcript"  title="Save transcript">Save</button>
-      </div>
-    </div>
-    <div id="transcript-body">
-      <p class="placeholder-text">Transcript will appear here once recording starts...</p>
-    </div>
-  </div>
-
-  <!-- ── CONTEXT BAR ────────────────────────────────────── -->
-  <div id="context-bar">
-    <div class="panel-label">💬 Context &amp; Question</div>
-    <div id="selected-text-display" class="empty-state">
-      Select text from transcript → it appears here
-    </div>
-    <div id="question-row">
-      <input
-        type="text"
-        id="question-input"
-        placeholder="Type your question about the selected context..."
-        autocomplete="off"
-      />
-      <button id="btn-ask">Ask</button>
-    </div>
-  </div>
-
-  <!-- ── ANSWER PANEL ───────────────────────────────────── -->
-  <div id="answer-panel">
-    <div class="panel-label">🤖 Answer</div>
-    <div id="answer-body">
-      <p class="placeholder-text">Your answer will appear here...</p>
-    </div>
-  </div>
-
-  <script src="renderer.js"></script>
-</body>
-</html>
+</div>
 ```
 
----
+Add a ⚙ settings button to the existing #win-controls in the header:
+```html
+<button class="ctrl-btn" id="btn-settings" title="Settings">⚙</button>
+```
+Place it BEFORE the minimise button.
 
-## Step 7 — Create styles.css
+### CSS for settings bar (add to styles.css):
 
 ```css
-/* ── Reset & base ─────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --bg-header:     rgba(15, 15, 25, 0.92);
-  --bg-panel:      rgba(20, 20, 32, 0.88);
-  --bg-context:    rgba(18, 18, 30, 0.90);
-  --bg-input:      rgba(255, 255, 255, 0.07);
-  --bg-btn:        rgba(79, 142, 247, 0.85);
-  --bg-btn-hover:  rgba(79, 142, 247, 1.0);
-  --border:        rgba(255, 255, 255, 0.08);
-  --text-primary:  rgba(255, 255, 255, 0.92);
-  --text-secondary:rgba(255, 255, 255, 0.50);
-  --text-accent:   #4f8ef7;
-  --cyan:          #00d4ff;
-  --danger:        #ff4f4f;
-  --radius:        8px;
-  --radius-sm:     4px;
-  --font:          -apple-system, 'Segoe UI', sans-serif;
+#settings-bar {
+  background:   rgba(15, 15, 25, 0.95);
+  border-top:   1px solid var(--border);
+  padding:      8px 10px;
+  flex-shrink:  0;
 }
+#settings-bar.hidden { display: none; }
 
-html, body {
-  width:      100%;
-  height:     100%;
-  background: transparent;
-  font-family: var(--font);
-  font-size:  13px;
-  color:      var(--text-primary);
-  overflow:   hidden;
-  display:    flex;
-  flex-direction: column;
-  border-radius: var(--radius);
-  /* Subtle border around whole app */
-  outline: 1px solid rgba(255,255,255,0.10);
-}
-
-/* ── HEADER ───────────────────────────────────────────── */
-#header {
-  display:         flex;
-  align-items:     center;
-  justify-content: space-between;
-  padding:         0 10px;
-  height:          38px;
-  background:      var(--bg-header);
-  border-radius:   var(--radius) var(--radius) 0 0;
-  -webkit-app-region: drag; /* drag window by header */
-  flex-shrink: 0;
-}
-
-#app-name {
+.settings-row {
   display:     flex;
   align-items: center;
-  gap:         7px;
-  font-size:   13px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  color: var(--text-primary);
-  -webkit-app-region: drag;
+  gap:         8px;
 }
-
-.dot {
-  width:         8px;
-  height:        8px;
-  border-radius: 50%;
-  background:    var(--cyan);
-  box-shadow:    0 0 6px var(--cyan);
-}
-
-#win-controls {
-  display: flex;
-  gap:     4px;
-  -webkit-app-region: no-drag;
-}
-
-.ctrl-btn {
-  background:    rgba(255,255,255,0.08);
-  border:        none;
-  border-radius: var(--radius-sm);
-  color:         var(--text-secondary);
-  font-size:     11px;
-  width:         22px;
-  height:        22px;
-  cursor:        pointer;
-  display:       flex;
-  align-items:   center;
-  justify-content: center;
-  transition:    all 0.15s;
-}
-.ctrl-btn:hover        { background: rgba(255,255,255,0.15); color: var(--text-primary); }
-.ctrl-btn.danger:hover { background: var(--danger); color: #fff; }
-
-/* ── PANELS ───────────────────────────────────────────── */
-.panel-label {
+.settings-row label {
   font-size:   11px;
-  font-weight: 600;
   color:       var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  padding:     8px 10px 4px;
+  white-space: nowrap;
 }
-
-/* ── TRANSCRIPT PANEL ─────────────────────────────────── */
-#transcript-panel {
-  flex:       2;          /* takes most vertical space */
-  display:    flex;
-  flex-direction: column;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  min-height: 0;
-  overflow:   hidden;
-}
-
-#transcript-header {
-  display:         flex;
-  align-items:     center;
-  justify-content: space-between;
-  padding-right:   10px;
-  flex-shrink:     0;
-}
-
-#transcript-controls {
-  display: flex;
-  gap: 4px;
-}
-
-.small-btn {
-  background:    rgba(255,255,255,0.07);
-  border:        1px solid rgba(255,255,255,0.10);
-  border-radius: var(--radius-sm);
-  color:         var(--text-secondary);
-  font-size:     10px;
-  padding:       2px 8px;
-  cursor:        pointer;
-  transition:    all 0.15s;
-}
-.small-btn:hover { background: rgba(255,255,255,0.14); color: var(--text-primary); }
-
-#transcript-body {
-  flex:       1;
-  overflow-y: auto;
-  padding:    6px 10px 10px;
-  line-height: 1.6;
-  font-size:  12px;
-  color:      var(--text-primary);
-  scroll-behavior: smooth;
-}
-
-#transcript-body::-webkit-scrollbar       { width: 4px; }
-#transcript-body::-webkit-scrollbar-track { background: transparent; }
-#transcript-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
-
-/* ── CONTEXT BAR ──────────────────────────────────────── */
-#context-bar {
-  background:  var(--bg-context);
-  border-top:  1px solid var(--border);
-  flex-shrink: 0;
-  padding-bottom: 8px;
-}
-
-#selected-text-display {
-  margin:        0 10px 6px;
-  padding:       6px 8px;
-  background:    rgba(79,142,247,0.08);
-  border:        1px solid rgba(79,142,247,0.20);
-  border-radius: var(--radius-sm);
-  font-size:     11px;
-  color:         var(--text-secondary);
-  min-height:    32px;
-  max-height:    72px;
-  overflow-y:    auto;
-  line-height:   1.5;
-}
-
-#selected-text-display.has-content {
-  color: var(--text-primary);
-  border-color: rgba(79,142,247,0.40);
-}
-
-.empty-state { color: var(--text-secondary); font-style: italic; }
-
-#question-row {
-  display: flex;
-  gap:     6px;
-  padding: 0 10px;
-}
-
-#question-input {
+.settings-row input {
   flex:          1;
   background:    var(--bg-input);
   border:        1px solid var(--border);
   border-radius: var(--radius-sm);
   color:         var(--text-primary);
-  font-size:     12px;
-  padding:       6px 10px;
+  font-size:     11px;
+  padding:       4px 8px;
   outline:       none;
-  transition:    border-color 0.15s;
 }
-#question-input:focus  { border-color: rgba(79,142,247,0.50); }
-#question-input::placeholder { color: var(--text-secondary); }
-
-#btn-ask {
+.settings-row input:focus { border-color: rgba(79,142,247,0.50); }
+#btn-save-settings {
   background:    var(--bg-btn);
   border:        none;
   border-radius: var(--radius-sm);
   color:         #fff;
-  font-size:     12px;
-  font-weight:   600;
-  padding:       6px 14px;
+  font-size:     11px;
+  padding:       4px 10px;
   cursor:        pointer;
-  transition:    background 0.15s;
-  white-space:   nowrap;
 }
-#btn-ask:hover { background: var(--bg-btn-hover); }
+#btn-save-settings:hover { background: var(--bg-btn-hover); }
+```
 
-/* ── ANSWER PANEL ─────────────────────────────────────── */
-#answer-panel {
-  flex:       1;
-  display:    flex;
-  flex-direction: column;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 var(--radius) var(--radius);
-  min-height: 0;
-  overflow:   hidden;
+---
+
+## Step 2 — Add Start/Stop button to header
+
+In index.html, add to #header between #app-name and #win-controls:
+
+```html
+<div id="record-controls">
+  <div id="rec-indicator" class="hidden">
+    <span class="rec-dot"></span>
+    <span id="rec-timer">00:00</span>
+  </div>
+  <button id="btn-start-stop" class="start-btn">▶ Start</button>
+</div>
+```
+
+### CSS (add to styles.css):
+
+```css
+#record-controls {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  -webkit-app-region: no-drag;
 }
-
-#answer-body {
-  flex:       1;
-  overflow-y: auto;
-  padding:    6px 10px 10px;
-  font-size:  12px;
-  line-height: 1.6;
+.start-btn {
+  background:    rgba(0, 200, 100, 0.20);
+  border:        1px solid rgba(0, 200, 100, 0.40);
+  border-radius: 12px;
+  color:         #00c864;
+  font-size:     11px;
+  font-weight:   600;
+  padding:       4px 12px;
+  cursor:        pointer;
+  transition:    all 0.15s;
 }
-
-#answer-body::-webkit-scrollbar       { width: 4px; }
-#answer-body::-webkit-scrollbar-track { background: transparent; }
-#answer-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
-
-/* ── PLACEHOLDER TEXT ─────────────────────────────────── */
-.placeholder-text {
-  color:      var(--text-secondary);
-  font-style: italic;
-  font-size:  11px;
-  padding:    4px 0;
+.start-btn:hover  { background: rgba(0, 200, 100, 0.35); }
+.start-btn.active {
+  background: rgba(255, 60, 60, 0.20);
+  border-color: rgba(255, 60, 60, 0.40);
+  color: #ff4f4f;
+}
+#rec-indicator {
+  display:     flex;
+  align-items: center;
+  gap:         5px;
+}
+#rec-indicator.hidden { display: none; }
+.rec-dot {
+  width:         7px;
+  height:        7px;
+  border-radius: 50%;
+  background:    #ff4f4f;
+  animation:     pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+#rec-timer {
+  font-size:   10px;
+  color:       var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 ```
 
 ---
 
-## Step 8 — Create renderer.js
+## Step 3 — Audio capture in renderer.js
 
-Block 1 renderer is minimal — just wire up window controls and the Ask button placeholder.
+This is the core of Block 2. Add the following to renderer.js.
+
+### 3A — New DOM refs (add after existing refs):
 
 ```javascript
-'use strict';
+const btnStartStop   = document.getElementById('btn-start-stop');
+const btnSettings    = document.getElementById('btn-settings');
+const settingsBar    = document.getElementById('settings-bar');
+const inputApiKey    = document.getElementById('input-api-key');
+const btnSaveSettings= document.getElementById('btn-save-settings');
+const recIndicator   = document.getElementById('rec-indicator');
+const recTimerEl     = document.getElementById('rec-timer');
+```
 
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const btnClose           = document.getElementById('btn-close');
-const btnHide            = document.getElementById('btn-hide');
-const btnMinimise        = document.getElementById('btn-minimise');
-const btnAsk             = document.getElementById('btn-ask');
-const btnClearTranscript = document.getElementById('btn-clear-transcript');
-const btnSaveTranscript  = document.getElementById('btn-save-transcript');
-const questionInput      = document.getElementById('question-input');
-const selectedTextDisplay= document.getElementById('selected-text-display');
-const transcriptBody     = document.getElementById('transcript-body');
-const answerBody         = document.getElementById('answer-body');
+### 3B — State variables (add after existing state):
 
-// ── Window controls ───────────────────────────────────────────────────────────
-btnClose.addEventListener('click',    () => window.meetAPI.close());
-btnHide.addEventListener('click',     () => window.meetAPI.hide());
-btnMinimise.addEventListener('click', () => window.meetAPI.minimise());
+```javascript
+// Recording state
+let isRecording      = false;
+let mediaStream      = null;
+let mediaRecorder    = null;
+let audioChunks      = [];
+let chunkTimer       = null;
+let recTimerInterval = null;
+let recSeconds       = 0;
+let transcriptLines  = [];   // full session transcript in memory
+```
 
-// ── Ask button (placeholder for Block 2+) ─────────────────────────────────────
-btnAsk.addEventListener('click', handleAsk);
-questionInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) handleAsk();
-});
+### 3C — Settings (add after state variables):
 
-function handleAsk() {
-  const question = questionInput.value.trim();
-  if (!question) return;
-  // Block 1 placeholder — real AI call comes in Block 5
-  answerBody.innerHTML = `<p class="placeholder-text">AI answer coming in Block 5... (question: "${question}")</p>`;
-  questionInput.value = '';
+```javascript
+// Load saved API key on startup
+const STORAGE_KEY_APIKEY = 'meetassist_openai_key';
+
+function getApiKey() {
+  return localStorage.getItem(STORAGE_KEY_APIKEY) || '';
 }
 
-// ── Clear transcript ───────────────────────────────────────────────────────────
+function loadSettings() {
+  inputApiKey.value = getApiKey();
+}
+
+function saveSettings() {
+  const key = inputApiKey.value.trim();
+  if (!key) return;
+  localStorage.setItem(STORAGE_KEY_APIKEY, key);
+  settingsBar.classList.add('hidden');
+}
+
+// Wire settings button
+btnSettings.addEventListener('click', () => {
+  settingsBar.classList.toggle('hidden');
+  if (!settingsBar.classList.contains('hidden')) {
+    inputApiKey.focus();
+  }
+});
+
+btnSaveSettings.addEventListener('click', saveSettings);
+inputApiKey.addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveSettings();
+});
+
+loadSettings();
+```
+
+### 3D — Recording timer:
+
+```javascript
+function startRecTimer() {
+  recSeconds = 0;
+  recTimerEl.textContent = '00:00';
+  recTimerInterval = setInterval(() => {
+    recSeconds++;
+    const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
+    const s = String(recSeconds % 60).padStart(2, '0');
+    recTimerEl.textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+function stopRecTimer() {
+  clearInterval(recTimerInterval);
+  recTimerInterval = null;
+}
+```
+
+### 3E — Whisper transcription call:
+
+```javascript
+async function transcribeChunk(audioBlob) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    appendTranscriptLine('[No API key — add it in Settings ⚙]');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'chunk.webm');
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'en');
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body:    formData
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      appendTranscriptLine(`[Whisper error: ${err?.error?.message || response.status}]`);
+      return;
+    }
+
+    const data = await response.json();
+    const text = data.text?.trim();
+
+    // Skip empty or noise-only chunks
+    if (text && text.length > 1) {
+      appendTranscriptLine(text);
+    }
+
+  } catch (err) {
+    appendTranscriptLine(`[Network error: ${err.message}]`);
+  }
+}
+```
+
+### 3F — Append transcript line:
+
+```javascript
+function appendTranscriptLine(text) {
+  // Remove placeholder if present
+  const placeholder = transcriptBody.querySelector('.placeholder-text');
+  if (placeholder) placeholder.remove();
+
+  // Add to in-memory array
+  transcriptLines.push({ text, time: new Date() });
+
+  // Create DOM element
+  const line = document.createElement('p');
+  line.className = 'transcript-line';
+  line.textContent = text;
+  transcriptBody.appendChild(line);
+
+  // Auto-scroll to bottom
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+}
+```
+
+Add to styles.css:
+```css
+.transcript-line {
+  padding:       2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 3px;
+  font-size:     12px;
+  line-height:   1.6;
+  color:         var(--text-primary);
+  user-select:   text;   /* allow text selection for context bar */
+}
+```
+
+### 3G — Audio capture and chunking:
+
+```javascript
+async function startRecording() {
+  if (isRecording) return;
+
+  // Get system audio via desktopCapturer (loopback)
+  // On Windows this captures all system audio output including Zoom/Meet
+  try {
+    // Request screen + audio — the audio track is the system loopback
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: {
+          chromeMediaSource:   'desktop',
+          chromeMediaSourceId: 'screen:0:0',  // default primary screen
+        }
+      },
+      video: false
+    });
+  } catch (err) {
+    appendTranscriptLine(`[Audio capture failed: ${err.message}]`);
+    return;
+  }
+
+  // Check we got an audio track
+  const audioTracks = mediaStream.getAudioTracks();
+  if (!audioTracks.length) {
+    appendTranscriptLine('[No audio track available — check Windows audio settings]');
+    return;
+  }
+
+  isRecording = true;
+  btnStartStop.textContent = '■ Stop';
+  btnStartStop.classList.add('active');
+  recIndicator.classList.remove('hidden');
+  startRecTimer();
+
+  // Use MediaRecorder to collect chunks
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
+
+  mediaRecorder.ondataavailable = e => {
+    if (e.data && e.data.size > 0) audioChunks.push(e.data);
+  };
+
+  // Every 5 seconds: stop current recorder, transcribe, restart
+  async function flushChunk() {
+    if (!isRecording) return;
+
+    mediaRecorder.stop();
+    await new Promise(res => mediaRecorder.onstop = res);
+
+    if (audioChunks.length) {
+      const blob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+      audioChunks = [];
+      transcribeChunk(blob); // fire and forget — don't await, keep recording
+    }
+
+    if (isRecording) {
+      // Restart recorder on same stream
+      mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
+      mediaRecorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+      };
+      mediaRecorder.start();
+      chunkTimer = setTimeout(flushChunk, 5000);
+    }
+  }
+
+  mediaRecorder.start();
+  chunkTimer = setTimeout(flushChunk, 5000);
+}
+
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+
+  clearTimeout(chunkTimer);
+  stopRecTimer();
+
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+
+  btnStartStop.textContent = '▶ Start';
+  btnStartStop.classList.remove('active');
+  recIndicator.classList.add('hidden');
+
+  appendTranscriptLine('── Recording stopped ──');
+}
+```
+
+### 3H — Wire Start/Stop button:
+
+```javascript
+btnStartStop.addEventListener('click', () => {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+});
+```
+
+### 3I — Update Clear transcript to also reset in-memory array:
+
+Find the existing btnClearTranscript handler and replace it:
+```javascript
 btnClearTranscript.addEventListener('click', () => {
+  transcriptLines = [];
   transcriptBody.innerHTML = '<p class="placeholder-text">Transcript cleared.</p>';
 });
-
-// ── Save transcript (placeholder) ─────────────────────────────────────────────
-btnSaveTranscript.addEventListener('click', () => {
-  // Real save comes in Block 6
-  alert('Save transcript — coming in Block 6');
-});
-
-// ── Text selection → context bar ─────────────────────────────────────────────
-// When user selects text anywhere in the transcript, show it in the context bar
-document.addEventListener('mouseup', () => {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed) return;
-
-  // Only capture selections inside the transcript body
-  const range = selection.getRangeAt(0);
-  if (!transcriptBody.contains(range.commonAncestorContainer)) return;
-
-  const selectedText = selection.toString().trim();
-  if (!selectedText) return;
-
-  selectedTextDisplay.textContent = selectedText;
-  selectedTextDisplay.classList.remove('empty-state');
-  selectedTextDisplay.classList.add('has-content');
-});
 ```
 
 ---
 
-## Step 9 — Initialize git and push to GitHub
+## Step 4 — Update CSP in index.html
 
-```bash
-# Initialize git
-git init
+The existing CSP blocks fetch() calls to OpenAI. Update the meta tag:
 
-# Add remote
-git remote add origin https://github.com/Kokkisa/MeetAssist.git
-
-# Create .gitignore
-echo "node_modules/" > .gitignore
-echo "dist/" >> .gitignore
-echo ".claude/" >> .gitignore
-echo "*.log" >> .gitignore
-
-# Stage everything
-git add .
-
-# First commit
-git commit -m "feat: v0.1.0 Block 1 - Electron shell, overlay window, layout skeleton"
-
-# Set branch and push
-git branch -M main
-git push -u origin main
-
-# Tag it
-git tag v0.1.0
-git push origin v0.1.0
+```html
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self';
+               style-src 'self' 'unsafe-inline';
+               connect-src https://api.openai.com;">
 ```
 
 ---
 
-## Definition of done — Block 1
+## Step 5 — Update main.js for audio permissions
 
-- [ ] `npm start` opens the overlay window
-- [ ] Window is transparent, always on top, no frame
-- [ ] Header shows "MeetAssist" with cyan dot
-- [ ] Three panels visible: transcript, context bar, answer
-- [ ] Close / Hide / Minimise buttons work
-- [ ] `Ctrl+Shift+M` toggles overlay visibility
-- [ ] Selecting text in transcript area shows it in context bar
-- [ ] Ask button shows placeholder response in answer panel
-- [ ] `setContentProtection(true)` is set
-- [ ] Committed and pushed to github.com/Kokkisa/MeetAssist as v0.1.0
+Electron requires explicit permission for audio capture.
+Add this to createWindow() AFTER mainWindow is created:
 
-## What Block 2 will add
-System audio capture via WASAPI loopback + continuous Whisper transcription
-feeding live text into the transcript panel.
+```javascript
+// Grant audio/media permissions for system loopback capture
+mainWindow.webContents.session.setPermissionRequestHandler(
+  (webContents, permission, callback) => {
+    const allowed = ['media', 'audioCapture', 'desktopCapture'];
+    callback(allowed.includes(permission));
+  }
+);
+```
 
-## Files to create (all new — no existing files)
-main.js, preload.js, renderer.js, index.html, styles.css, package.json, .gitignore
+---
+
+## Edge cases to handle
+
+| Scenario | Handling |
+|---|---|
+| No API key set | Show message in transcript: [No API key — add in Settings] |
+| Whisper returns empty | Skip silently — don't append blank line |
+| Audio chunk too short (<0.5s) | Skip transcription — Whisper returns noise |
+| Network error | Append error line, keep recording |
+| User clicks Stop mid-chunk | Flush last chunk before stopping |
+| MediaRecorder mimeType not supported | Fallback to 'audio/webm' without codec spec |
+
+---
+
+## Definition of done — Block 2
+
+- [ ] ⚙ settings button shows/hides settings bar
+- [ ] API key saves to localStorage on Save or Enter
+- [ ] ▶ Start button begins audio capture
+- [ ] Recording indicator (pulsing red dot + timer) shows while recording
+- [ ] Transcript lines appear every ~5 seconds from Whisper
+- [ ] ■ Stop button ends capture cleanly
+- [ ] Clear button resets both DOM and transcriptLines array
+- [ ] No audio packages installed — uses Web Audio API only
+- [ ] Committed and pushed as v0.2.0
+
+## What Block 3 will add
+Text selection from transcript → context bar (auto-populate selected text),
+and manual context editing before asking the AI.

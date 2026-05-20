@@ -1,6 +1,6 @@
 {
   "name": "meetassist",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Stealth meeting assistant — live transcript, selective AI answers",
   "main": "main.js",
   "scripts": {
