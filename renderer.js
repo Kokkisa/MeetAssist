@@ -24,6 +24,11 @@ const recTimerEl      = document.getElementById('rec-timer');
 const btnClearContext = document.getElementById('btn-clear-context');
 const btnCopyAnswer   = document.getElementById('btn-copy-answer');
 
+// Block 4 — settings: model selector, language input, chunk-size selector
+const selectModel    = document.getElementById('select-model');
+const inputLanguage  = document.getElementById('input-language');
+const selectChunk    = document.getElementById('select-chunk');
+
 // ── Recording state ───────────────────────────────────────────────────────────
 let isRecording      = false;
 let mediaStream      = null;
@@ -42,19 +47,47 @@ btnMinimise.addEventListener('click', () => window.meetAPI.minimise());
 // ── Settings ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY_APIKEY = 'meetassist_openai_key';
 const STORAGE_KEY_MODEL  = 'meetassist_model'; // 'gpt-4o' or 'gpt-4o-mini' — Block 4 will expose a selector
+// Block 4 — Whisper language code + chunk interval (ms)
+const STORAGE_KEY_LANGUAGE = 'meetassist_language';
+const STORAGE_KEY_CHUNK    = 'meetassist_chunk_ms';
 
 function getApiKey() {
   return localStorage.getItem(STORAGE_KEY_APIKEY) || '';
 }
 
+// Archived 2026-05-20: Block 2/3 loadSettings only loaded the API key. Replaced
+// by Block 4 version that also restores model, Whisper language, and chunk
+// size. Kept per archive rule.
+//
+// function loadSettings() {
+//   inputApiKey.value = getApiKey();
+// }
+
 function loadSettings() {
-  inputApiKey.value = getApiKey();
+  inputApiKey.value   = getApiKey();
+  selectModel.value   = localStorage.getItem(STORAGE_KEY_MODEL)    || 'gpt-4o-mini';
+  inputLanguage.value = localStorage.getItem(STORAGE_KEY_LANGUAGE) || 'en';
+  selectChunk.value   = localStorage.getItem(STORAGE_KEY_CHUNK)    || '5000';
 }
+
+// Archived 2026-05-20: Block 2/3 saveSettings only persisted the API key.
+// Replaced by Block 4 version that also persists model, language, and chunk
+// size. Kept per archive rule.
+//
+// function saveSettings() {
+//   const key = inputApiKey.value.trim();
+//   if (!key) return;
+//   localStorage.setItem(STORAGE_KEY_APIKEY, key);
+//   settingsBar.classList.add('hidden');
+// }
 
 function saveSettings() {
   const key = inputApiKey.value.trim();
   if (!key) return;
-  localStorage.setItem(STORAGE_KEY_APIKEY, key);
+  localStorage.setItem(STORAGE_KEY_APIKEY,   key);
+  localStorage.setItem(STORAGE_KEY_MODEL,    selectModel.value);
+  localStorage.setItem(STORAGE_KEY_LANGUAGE, inputLanguage.value.trim() || 'en');
+  localStorage.setItem(STORAGE_KEY_CHUNK,    selectChunk.value);
   settingsBar.classList.add('hidden');
 }
 
@@ -100,7 +133,9 @@ async function transcribeChunk(audioBlob) {
   const formData = new FormData();
   formData.append('file', audioBlob, 'chunk.webm');
   formData.append('model', 'whisper-1');
-  formData.append('language', 'en');
+  // Archived 2026-05-20: hardcoded 'en' → STORAGE_KEY_LANGUAGE lookup (Block 4)
+  // formData.append('language', 'en');
+  formData.append('language', localStorage.getItem(STORAGE_KEY_LANGUAGE) || 'en');
 
   try {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -129,18 +164,45 @@ async function transcribeChunk(audioBlob) {
 }
 
 // ── Append transcript line ────────────────────────────────────────────────────
+// Archived 2026-05-20: Block 2 version with no timestamp prefix. Replaced by
+// Block 4 version that prepends HH:MM:SS in a non-selectable span so the
+// timestamp text never pollutes context-bar selections. Kept per archive rule.
+//
+// function appendTranscriptLine(text) {
+//   const placeholder = transcriptBody.querySelector('.placeholder-text');
+//   if (placeholder) placeholder.remove();
+//   transcriptLines.push({ text, time: new Date() });
+//   const line = document.createElement('p');
+//   line.className = 'transcript-line';
+//   line.textContent = text;
+//   transcriptBody.appendChild(line);
+//   transcriptBody.scrollTop = transcriptBody.scrollHeight;
+// }
+
 function appendTranscriptLine(text) {
   // Remove placeholder if present
   const placeholder = transcriptBody.querySelector('.placeholder-text');
   if (placeholder) placeholder.remove();
 
-  // Add to in-memory array
-  transcriptLines.push({ text, time: new Date() });
+  const now = new Date();
+  transcriptLines.push({ text, time: now });
 
-  // Create DOM element
+  // Format timestamp HH:MM:SS
+  const ts = now.toTimeString().slice(0, 8);
+
   const line = document.createElement('p');
   line.className = 'transcript-line';
-  line.textContent = text;
+
+  const tsSpan = document.createElement('span');
+  tsSpan.className = 'transcript-ts';
+  tsSpan.textContent = ts;
+
+  const textSpan = document.createElement('span');
+  textSpan.className = 'transcript-text';
+  textSpan.textContent = ' ' + text;
+
+  line.appendChild(tsSpan);
+  line.appendChild(textSpan);
   transcriptBody.appendChild(line);
 
   // Auto-scroll to bottom
@@ -218,12 +280,16 @@ async function startRecording() {
         if (e.data && e.data.size > 0) audioChunks.push(e.data);
       };
       mediaRecorder.start();
-      chunkTimer = setTimeout(flushChunk, 5000);
+      // Archived 2026-05-20: hardcoded 5000ms → STORAGE_KEY_CHUNK lookup (Block 4)
+      // chunkTimer = setTimeout(flushChunk, 5000);
+      chunkTimer = setTimeout(flushChunk, parseInt(localStorage.getItem(STORAGE_KEY_CHUNK) || '5000'));
     }
   }
 
   mediaRecorder.start();
-  chunkTimer = setTimeout(flushChunk, 5000);
+  // Archived 2026-05-20: hardcoded 5000ms → STORAGE_KEY_CHUNK lookup (Block 4)
+  // chunkTimer = setTimeout(flushChunk, 5000);
+  chunkTimer = setTimeout(flushChunk, parseInt(localStorage.getItem(STORAGE_KEY_CHUNK) || '5000'));
 }
 
 function stopRecording() {

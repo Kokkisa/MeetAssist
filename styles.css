@@ -285,6 +285,25 @@ html, body {
 }
 #btn-save-settings:hover { background: var(--bg-btn-hover); }
 
+/* Block 4 — settings selects + hint text */
+select {
+  background:    var(--bg-input);
+  border:        1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color:         var(--text-primary);
+  font-size:     11px;
+  padding:       4px 8px;
+  outline:       none;
+  cursor:        pointer;
+}
+select:focus { border-color: rgba(79,142,247,0.50); }
+
+.settings-hint {
+  font-size:  10px;
+  color:      var(--text-secondary);
+  white-space: nowrap;
+}
+
 /* ── RECORD CONTROLS ──────────────────────────────────── */
 #record-controls {
   display:     flex;
@@ -333,6 +352,12 @@ html, body {
 }
 
 /* ── TRANSCRIPT LINE ──────────────────────────────────── */
+/* Archived 2026-05-20: Block 2 .transcript-line rule. Replaced by Block 4
+   version that uses flex to align an HH:MM:SS timestamp span and the text
+   span on a shared baseline. Kept per archive rule. (Inner inline comment
+   in the original — "allow text selection for context bar" — removed in this
+   archived copy because CSS comments do not nest.)
+
 .transcript-line {
   padding:       2px 0;
   border-bottom: 1px solid rgba(255,255,255,0.04);
@@ -340,7 +365,32 @@ html, body {
   font-size:     12px;
   line-height:   1.6;
   color:         var(--text-primary);
-  user-select:   text;   /* allow text selection for context bar */
+  user-select:   text;
+}
+*/
+
+.transcript-line {
+  display:       flex;
+  align-items:   baseline;
+  padding:       2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 3px;
+  user-select:   text;
+}
+
+.transcript-ts {
+  color:         var(--text-secondary);
+  font-size:     10px;
+  font-variant-numeric: tabular-nums;
+  margin-right:  6px;
+  flex-shrink:   0;
+  user-select:   none; /* don't include timestamp in text selection */
+}
+
+.transcript-text {
+  color:       var(--text-primary);
+  font-size:   12px;
+  line-height: 1.6;
 }
 
 /* ── BLOCK 3 — CONTEXT-BAR + ANSWER HEADERS ──────────── */

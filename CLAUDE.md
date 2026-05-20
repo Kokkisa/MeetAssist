@@ -1,14 +1,15 @@
-# CLAUDE.md — MeetAssist Block 3 (v0.3.0)
+# CLAUDE.md — MeetAssist Block 4 (v0.4.0)
 
 ## Context
 
 Block 1 (v0.1.0) — Electron shell, overlay window, layout skeleton ✅
 Block 2 (v0.2.0) — System audio capture, Whisper transcription, live transcript ✅
+Block 3 (v0.3.0) — Text selection, context bar, AI answer streaming ✅
 Repo: https://github.com/Kokkisa/MeetAssist
-Current commit: 40c6d4c
+Current commit: bd8c68a
 
 Read ALL existing source files before touching anything.
-Build Block 3 features on top of Block 2. Do NOT rewrite or restructure anything.
+Build Block 4 features on top of Block 3. Do NOT rewrite or restructure anything.
 
 ## ARCHIVE RULE (mandatory)
 Never delete working code. Comment it out with reason and date.
@@ -16,376 +17,259 @@ Always commit a WIP state before trying alternative approaches.
 
 ---
 
-## Block 3 Goal
+## Block 4 Goal
 
-Three features, in order:
+Four improvements that make MeetAssist more useful in real meetings:
 
-1. **Text selection → context bar** — when user selects any text in the
-   transcript panel, it auto-populates the context display in the context bar
+1. **Timestamps on transcript lines** — each line shows the time it was captured (HH:MM:SS)
+2. **Model selector in settings** — user can switch between gpt-4o and gpt-4o-mini
+3. **Language setting** — user can set Whisper transcription language (default: en)
+4. **Chunk size control** — user can change transcription interval (3s / 5s / 10s)
 
-2. **Manual context editing** — user can edit the selected text in the
-   context bar before asking, and can clear it
-
-3. **AI answer on demand** — when user clicks Ask (or presses Enter),
-   the selected context + question is sent to GPT-4o and the answer
-   streams into the answer panel
-
-Block 3 is done when:
-- User selects transcript text → appears in context bar automatically
-- User types a question → clicks Ask or presses Enter
-- Answer streams word by word into the answer panel
-- Multiple rounds work (ask again with new selection)
-- Committed and pushed as v0.3.0
+Block 4 is done when:
+- Every transcript line has a timestamp prefix
+- Settings bar has model, language, and chunk size controls
+- All settings persist in localStorage
+- Committed and pushed as v0.4.0
 
 ---
 
-## Feature 1 — Text Selection → Context Bar
+## Feature 1 — Timestamps on Transcript Lines
 
 ### How it works
-The transcript panel (`#transcript-body`) contains `.transcript-line` paragraphs.
-When the user selects text anywhere inside `#transcript-body` and releases
-the mouse, capture the selected text and populate `#selected-text-display`.
+When `appendTranscriptLine(text)` is called in renderer.js, prepend a
+timestamp showing the wall-clock time the line was captured.
 
-### Current state of context bar in index.html
-The Block 1/2 HTML already has:
-- `#selected-text-display` — shows selected text (currently placeholder text)
-- `#question-input` — user types their question
-- `#btn-ask` — triggers the AI call
+### Update appendTranscriptLine in renderer.js
 
-Block 2 renderer.js already has a basic mouseup handler for this.
-READ the existing handler first — do NOT duplicate it. Extend or replace it cleanly.
-
-### Improved selection handler (replace existing mouseup handler in renderer.js):
+Find the existing `appendTranscriptLine(text)` function and update it.
+Archive the original with a comment, then replace:
 
 ```javascript
-// ── Text selection → context bar ─────────────────────────────────────────────
-let lastSelectedText = '';
+// Archived 2026-05-20 — no timestamp version
+// function appendTranscriptLine(text) {
+//   const placeholder = transcriptBody.querySelector('.placeholder-text');
+//   if (placeholder) placeholder.remove();
+//   transcriptLines.push({ text, time: new Date() });
+//   const line = document.createElement('p');
+//   line.className = 'transcript-line';
+//   line.textContent = text;
+//   transcriptBody.appendChild(line);
+//   transcriptBody.scrollTop = transcriptBody.scrollHeight;
+// }
 
-document.addEventListener('mouseup', () => {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed) return;
+function appendTranscriptLine(text) {
+  // Remove placeholder if present
+  const placeholder = transcriptBody.querySelector('.placeholder-text');
+  if (placeholder) placeholder.remove();
 
-  const range = selection.getRangeAt(0);
+  const now = new Date();
+  transcriptLines.push({ text, time: now });
 
-  // Only capture selections inside transcript-body
-  if (!transcriptBody.contains(range.commonAncestorContainer)) return;
+  // Format timestamp HH:MM:SS
+  const ts = now.toTimeString().slice(0, 8);
 
-  const selectedText = selection.toString().trim();
-  if (!selectedText || selectedText === lastSelectedText) return;
+  const line = document.createElement('p');
+  line.className = 'transcript-line';
 
-  lastSelectedText = selectedText;
-  setContextText(selectedText);
-});
+  const tsSpan = document.createElement('span');
+  tsSpan.className = 'transcript-ts';
+  tsSpan.textContent = ts;
 
-function setContextText(text) {
-  selectedTextDisplay.textContent = text;
-  selectedTextDisplay.classList.remove('empty-state');
-  selectedTextDisplay.classList.add('has-content');
-  // Focus question input so user can type immediately
-  questionInput.focus();
-}
+  const textSpan = document.createElement('span');
+  textSpan.className = 'transcript-text';
+  textSpan.textContent = ' ' + text;
 
-function clearContext() {
-  lastSelectedText = '';
-  selectedTextDisplay.textContent = 'Select text from transcript → it appears here';
-  selectedTextDisplay.classList.add('empty-state');
-  selectedTextDisplay.classList.remove('has-content');
+  line.appendChild(tsSpan);
+  line.appendChild(textSpan);
+  transcriptBody.appendChild(line);
+
+  // Auto-scroll to bottom
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
 }
 ```
 
-### Add a Clear button to context bar (index.html)
-
-In the context bar section, add a small Clear button next to the panel label:
-
-```html
-<div class="context-bar-header">
-  <div class="panel-label">💬 Context &amp; Question</div>
-  <button class="small-btn" id="btn-clear-context">Clear</button>
-</div>
-```
-
-Replace the existing lone `<div class="panel-label">` line in #context-bar with this.
-
-### CSS for context-bar-header (add to styles.css):
+### CSS for timestamp (add to styles.css):
 
 ```css
-.context-bar-header {
-  display:         flex;
-  align-items:     center;
-  justify-content: space-between;
-  padding-right:   10px;
-}
-```
-
-### Wire the clear button in renderer.js:
-
-```javascript
-const btnClearContext = document.getElementById('btn-clear-context');
-btnClearContext.addEventListener('click', clearContext);
-```
-
----
-
-## Feature 2 — AI Answer Streaming
-
-### Settings addition — store model preference
-
-Add to localStorage keys:
-```javascript
-const STORAGE_KEY_MODEL = 'meetassist_model'; // 'gpt-4o' or 'gpt-4o-mini'
-```
-
-No UI for model selector in Block 3 — default to `gpt-4o-mini` for speed and cost.
-User can change in Block 4 settings expansion.
-
-### The ask flow
-
-When user clicks Ask or presses Enter in `#question-input`:
-
-1. Read context from `#selected-text-display` (if has-content class)
-2. Read question from `#question-input`
-3. Validate — at least one of context or question must be non-empty
-4. Build messages array for GPT-4o
-5. Stream response into `#answer-body`
-6. Clear question input after submit
-7. Keep context — user may want to ask follow-up on same selection
-
-### System prompt for MeetAssist:
-
-```javascript
-const SYSTEM_PROMPT = `You are MeetAssist, a real-time meeting assistant.
-The user is in a live meeting (Zoom, Google Meet, Teams, etc).
-You are given a transcript excerpt from the meeting and a question about it.
-
-Your job:
-- Answer the question clearly and concisely based on the transcript context
-- If no context is provided, answer the question from general knowledge
-- Keep answers brief (2-4 sentences) unless the question requires more detail
-- Use plain text — no markdown, no bullet points, no headers
-- If asked to summarize, give a 3-5 sentence summary
-- If asked for action items, list them as plain numbered items
-- Never say "based on the transcript" — just answer directly
-
-The user may be reading your answer while on a live call, so be fast and clear.`;
-```
-
-### buildMessages function:
-
-```javascript
-function buildMessages(contextText, question) {
-  const hasContext = contextText &&
-    !selectedTextDisplay.classList.contains('empty-state');
-
-  let userContent = '';
-
-  if (hasContext && question) {
-    userContent = `Transcript excerpt:\n"${contextText}"\n\nQuestion: ${question}`;
-  } else if (hasContext && !question) {
-    userContent = `Transcript excerpt:\n"${contextText}"\n\nPlease summarize this.`;
-  } else if (!hasContext && question) {
-    userContent = question;
-  } else {
-    return null; // nothing to send
-  }
-
-  return [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user',   content: userContent }
-  ];
-}
-```
-
-### streamAnswer function (SSE streaming):
-
-```javascript
-async function streamAnswer(messages) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    showAnswerError('No API key — add it in Settings ⚙');
-    return;
-  }
-
-  // Show loading state
-  answerBody.innerHTML = '<p class="answer-streaming">thinking...</p>';
-  btnAsk.disabled = true;
-  btnAsk.textContent = '...';
-
-  let fullText = '';
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model:       localStorage.getItem(STORAGE_KEY_MODEL) || 'gpt-4o-mini',
-        messages:    messages,
-        max_tokens:  500,
-        stream:      true,
-        temperature: 0.3
-      })
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      showAnswerError(`API error: ${err?.error?.message || response.status}`);
-      return;
-    }
-
-    // Stream SSE response
-    const reader  = response.body.getReader();
-    const decoder = new TextDecoder();
-    answerBody.innerHTML = '';
-
-    const answerEl = document.createElement('p');
-    answerEl.className = 'answer-text';
-    answerBody.appendChild(answerEl);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
-
-      for (const line of lines) {
-        const data = line.slice(6); // remove 'data: '
-        if (data === '[DONE]') break;
-
-        try {
-          const parsed = JSON.parse(data);
-          const delta  = parsed.choices?.[0]?.delta?.content || '';
-          fullText += delta;
-          answerEl.textContent = fullText;
-          // Auto-scroll answer panel
-          answerBody.scrollTop = answerBody.scrollHeight;
-        } catch {
-          // Skip malformed SSE chunks
-        }
-      }
-    }
-
-  } catch (err) {
-    showAnswerError(`Network error: ${err.message}`);
-  } finally {
-    btnAsk.disabled = false;
-    btnAsk.textContent = 'Ask';
-  }
+.transcript-ts {
+  color:         var(--text-secondary);
+  font-size:     10px;
+  font-variant-numeric: tabular-nums;
+  margin-right:  6px;
+  flex-shrink:   0;
+  user-select:   none; /* don't include timestamp in text selection */
 }
 
-function showAnswerError(msg) {
-  answerBody.innerHTML = `<p class="answer-error">${msg}</p>`;
-  btnAsk.disabled = false;
-  btnAsk.textContent = 'Ask';
-}
-```
-
-### handleAsk function (replace existing placeholder):
-
-Find the existing `handleAsk()` function in renderer.js and replace it entirely:
-
-```javascript
-function handleAsk() {
-  const contextText = selectedTextDisplay.textContent.trim();
-  const question    = questionInput.value.trim();
-
-  const messages = buildMessages(contextText, question);
-  if (!messages) {
-    // Flash the context bar to indicate nothing to send
-    selectedTextDisplay.style.borderColor = 'rgba(255,80,80,0.6)';
-    setTimeout(() => {
-      selectedTextDisplay.style.borderColor = '';
-    }, 800);
-    return;
-  }
-
-  questionInput.value = '';
-  streamAnswer(messages);
-}
-```
-
-### CSS additions for answer panel (add to styles.css):
-
-```css
-.answer-text {
+.transcript-text {
   color:       var(--text-primary);
   font-size:   12px;
-  line-height: 1.7;
-  white-space: pre-wrap;
+  line-height: 1.6;
 }
 
-.answer-streaming {
-  color:      var(--text-secondary);
-  font-style: italic;
-  font-size:  12px;
-  animation:  pulse-opacity 1s ease-in-out infinite;
-}
-
-@keyframes pulse-opacity {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
-}
-
-.answer-error {
-  color:     #ff6b6b;
-  font-size: 12px;
-}
-
-/* Answer panel label row with copy button */
-.answer-header {
-  display:         flex;
-  align-items:     center;
-  justify-content: space-between;
-  padding-right:   10px;
+/* Update transcript-line to use flex for ts + text alignment */
+.transcript-line {
+  display:       flex;
+  align-items:   baseline;
+  padding:       2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 3px;
+  user-select:   text;
 }
 ```
 
-### Add Copy button to answer panel header (index.html):
+Note: `.transcript-line` already exists in styles.css from Block 2.
+Replace the existing `.transcript-line` rule with the updated version above.
+Archive the old one with a comment.
 
-Replace the existing lone `<div class="panel-label">🤖 Answer</div>` in #answer-panel:
+---
+
+## Feature 2 — Model Selector in Settings
+
+### Add to settings-bar in index.html
+
+The existing settings-bar has one row (API key).
+Add two more rows below it — model selector and language input:
 
 ```html
-<div class="answer-header">
-  <div class="panel-label">🤖 Answer</div>
-  <button class="small-btn" id="btn-copy-answer" title="Copy answer">Copy</button>
+<!-- Model selector row -->
+<div class="settings-row">
+  <label for="select-model">AI Model</label>
+  <select id="select-model">
+    <option value="gpt-4o-mini">gpt-4o-mini (fast)</option>
+    <option value="gpt-4o">gpt-4o (best)</option>
+  </select>
+</div>
+
+<!-- Language row -->
+<div class="settings-row">
+  <label for="input-language">Whisper Language</label>
+  <input
+    type="text"
+    id="input-language"
+    placeholder="en"
+    maxlength="5"
+    style="max-width: 60px;"
+    autocomplete="off"
+  />
+  <span class="settings-hint">e.g. en, hi, te, fr</span>
+</div>
+
+<!-- Chunk size row -->
+<div class="settings-row">
+  <label for="select-chunk">Chunk Size</label>
+  <select id="select-chunk">
+    <option value="3000">3 seconds</option>
+    <option value="5000" selected>5 seconds (default)</option>
+    <option value="10000">10 seconds</option>
+  </select>
 </div>
 ```
 
-Wire in renderer.js:
-```javascript
-const btnCopyAnswer = document.getElementById('btn-copy-answer');
-btnCopyAnswer.addEventListener('click', () => {
-  const text = answerBody.innerText.trim();
-  if (!text || text === 'Your answer will appear here...') return;
-  navigator.clipboard.writeText(text);
-  btnCopyAnswer.textContent = 'Copied!';
-  setTimeout(() => btnCopyAnswer.textContent = 'Copy', 2000);
-});
+Place these rows AFTER the existing API key row, BEFORE the Save button.
+The Save button already exists — do not add another one.
+
+### CSS additions (add to styles.css):
+
+```css
+select {
+  background:    var(--bg-input);
+  border:        1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color:         var(--text-primary);
+  font-size:     11px;
+  padding:       4px 8px;
+  outline:       none;
+  cursor:        pointer;
+}
+select:focus { border-color: rgba(79,142,247,0.50); }
+
+.settings-hint {
+  font-size:  10px;
+  color:      var(--text-secondary);
+  white-space: nowrap;
+}
 ```
 
 ---
 
-## Edge cases to handle
+## Feature 3 — Wire New Settings in renderer.js
 
-| Scenario | Handling |
-|---|---|
-| User clicks Ask with no context and no question | Flash red border on context bar, do nothing |
-| User clicks Ask with only context, no question | Auto-summarize the context |
-| User clicks Ask with only question, no context | Answer from general knowledge |
-| API key missing | Show error in answer panel |
-| Network error mid-stream | Show error, re-enable Ask button |
-| User clicks Ask while answer is streaming | Disabled until stream completes |
-| Very long context (>2000 chars) | Truncate to first 2000 chars, append "..." |
+### New storage keys (add alongside existing STORAGE_KEY_APIKEY):
 
-Add truncation to buildMessages:
 ```javascript
-const MAX_CONTEXT = 2000;
-if (hasContext && contextText.length > MAX_CONTEXT) {
-  contextText = contextText.slice(0, MAX_CONTEXT) + '...';
+const STORAGE_KEY_MODEL    = 'meetassist_model';    // already exists from Block 3
+const STORAGE_KEY_LANGUAGE = 'meetassist_language';
+const STORAGE_KEY_CHUNK    = 'meetassist_chunk_ms';
+```
+
+Note: STORAGE_KEY_MODEL already exists from Block 3 — do not duplicate it.
+
+### New DOM refs (add after existing refs):
+
+```javascript
+const selectModel    = document.getElementById('select-model');
+const inputLanguage  = document.getElementById('input-language');
+const selectChunk    = document.getElementById('select-chunk');
+```
+
+### Update loadSettings() to load new values:
+
+Find the existing loadSettings() function and extend it:
+
+```javascript
+function loadSettings() {
+  inputApiKey.value      = getApiKey();
+  selectModel.value      = localStorage.getItem(STORAGE_KEY_MODEL)    || 'gpt-4o-mini';
+  inputLanguage.value    = localStorage.getItem(STORAGE_KEY_LANGUAGE)  || 'en';
+  selectChunk.value      = localStorage.getItem(STORAGE_KEY_CHUNK)     || '5000';
 }
 ```
+
+### Update saveSettings() to save new values:
+
+Find the existing saveSettings() function and extend it:
+
+```javascript
+function saveSettings() {
+  const key = inputApiKey.value.trim();
+  if (!key) return;
+  localStorage.setItem(STORAGE_KEY_APIKEY,   key);
+  localStorage.setItem(STORAGE_KEY_MODEL,    selectModel.value);
+  localStorage.setItem(STORAGE_KEY_LANGUAGE, inputLanguage.value.trim() || 'en');
+  localStorage.setItem(STORAGE_KEY_CHUNK,    selectChunk.value);
+  settingsBar.classList.add('hidden');
+}
+```
+
+### Update transcribeChunk() to use language setting:
+
+Find the existing `transcribeChunk(audioBlob)` function.
+Find the line: `formData.append('language', 'en');`
+Replace it with:
+```javascript
+formData.append('language', localStorage.getItem(STORAGE_KEY_LANGUAGE) || 'en');
+```
+
+### Update chunk timer to use chunk size setting:
+
+In `startRecording()`, find the line:
+```javascript
+chunkTimer = setTimeout(flushChunk, 5000);
+```
+There are TWO occurrences of this line (one initial, one inside flushChunk for restart).
+Replace BOTH with:
+```javascript
+chunkTimer = setTimeout(flushChunk, parseInt(localStorage.getItem(STORAGE_KEY_CHUNK) || '5000'));
+```
+
+### Update streamAnswer() to use model setting:
+
+The existing streamAnswer() already reads:
+```javascript
+model: localStorage.getItem(STORAGE_KEY_MODEL) || 'gpt-4o-mini',
+```
+This is already correct from Block 3 — no change needed here.
 
 ---
 
@@ -393,13 +277,13 @@ if (hasContext && contextText.length > MAX_CONTEXT) {
 
 | File | Changes |
 |---|---|
-| renderer.js | Replace mouseup handler, add setContextText/clearContext, add buildMessages, add streamAnswer, add showAnswerError, replace handleAsk, add btnClearContext + btnCopyAnswer refs and handlers, add SYSTEM_PROMPT and STORAGE_KEY_MODEL constants |
-| index.html | Add context-bar-header div with Clear button, add answer-header div with Copy button, update CSP (already has connect-src api.openai.com from Block 2) |
-| styles.css | Add .context-bar-header, .answer-text, .answer-streaming, .answer-error, .answer-header |
+| renderer.js | Update appendTranscriptLine (archive old), extend loadSettings + saveSettings, add 3 new DOM refs, add STORAGE_KEY_LANGUAGE + STORAGE_KEY_CHUNK, update transcribeChunk language, update both chunkTimer setTimeout calls |
+| index.html | Add 3 new settings rows (model, language, chunk) inside settings-bar |
+| styles.css | Add .transcript-ts, .transcript-text, update .transcript-line to flex, add select styles, .settings-hint |
 
-DO NOT create new files.
-DO NOT touch main.js or preload.js — no changes needed.
-DO NOT touch any audio capture or transcription code.
+DO NOT touch main.js or preload.js.
+DO NOT touch audio capture, Whisper call structure, or AI streaming logic.
+DO NOT touch Block 1/2/3 features — only extend them.
 
 ---
 
@@ -409,20 +293,19 @@ DO NOT touch any audio capture or transcription code.
 
 ---
 
-## Definition of done — Block 3
+## Definition of done — Block 4
 
-- [ ] Selecting text in transcript → populates context bar automatically
-- [ ] Clear button resets context bar
-- [ ] Ask with context + question → streams answer
-- [ ] Ask with context only → auto-summarizes
-- [ ] Ask with question only → answers from general knowledge
-- [ ] Copy button copies answer to clipboard
-- [ ] Ask button disabled during streaming
-- [ ] Multiple rounds work without refresh
-- [ ] No changes to audio/transcription code
-- [ ] Committed and pushed as v0.3.0
+- [ ] Every new transcript line shows HH:MM:SS timestamp prefix
+- [ ] Timestamp is not selectable (user-select: none) so it doesn't pollute context
+- [ ] Settings bar has model, language, chunk size rows
+- [ ] Saving settings persists all 4 values to localStorage
+- [ ] Loading app restores all 4 saved values
+- [ ] Whisper uses saved language setting
+- [ ] Chunk timer uses saved chunk size
+- [ ] AI answer uses saved model
+- [ ] No changes to main.js or preload.js
+- [ ] Committed and pushed as v0.4.0
 
-## What Block 4 will add
-Settings expansion (model selector, language, chunk size),
-transcript timestamps, speaker labels placeholder,
-and session save to disk.
+## What Block 5 will add
+Session save to disk — export full transcript as .txt file with timestamps,
+triggered by the existing Save button in the transcript header.

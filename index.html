@@ -41,6 +41,39 @@
       <input type="password" id="input-api-key" placeholder="sk-..." autocomplete="off" />
       <button id="btn-save-settings">Save</button>
     </div>
+
+    <!-- Block 4 — Model selector row -->
+    <div class="settings-row">
+      <label for="select-model">AI Model</label>
+      <select id="select-model">
+        <option value="gpt-4o-mini">gpt-4o-mini (fast)</option>
+        <option value="gpt-4o">gpt-4o (best)</option>
+      </select>
+    </div>
+
+    <!-- Block 4 — Whisper language row -->
+    <div class="settings-row">
+      <label for="input-language">Whisper Language</label>
+      <input
+        type="text"
+        id="input-language"
+        placeholder="en"
+        maxlength="5"
+        style="max-width: 60px;"
+        autocomplete="off"
+      />
+      <span class="settings-hint">e.g. en, hi, te, fr</span>
+    </div>
+
+    <!-- Block 4 — Chunk size row -->
+    <div class="settings-row">
+      <label for="select-chunk">Chunk Size</label>
+      <select id="select-chunk">
+        <option value="3000">3 seconds</option>
+        <option value="5000" selected>5 seconds (default)</option>
+        <option value="10000">10 seconds</option>
+      </select>
+    </div>
   </div>
 
   <!-- ── TRANSCRIPT PANEL ───────────────────────────────── -->
