@@ -24,6 +24,9 @@ const recTimerEl      = document.getElementById('rec-timer');
 const btnClearContext = document.getElementById('btn-clear-context');
 const btnCopyAnswer   = document.getElementById('btn-copy-answer');
 
+// Block 6 — Clear-all-answers button in the answer-header-controls wrapper
+const btnClearAnswers = document.getElementById('btn-clear-answers');
+
 // Block 4 — settings: model selector, language input, chunk-size selector
 const selectModel    = document.getElementById('select-model');
 const inputLanguage  = document.getElementById('input-language');
@@ -38,6 +41,16 @@ let chunkTimer       = null;
 let recTimerInterval = null;
 let recSeconds       = 0;
 let transcriptLines  = [];   // full session transcript in memory
+
+// Block 6 — Q&A history: each Ask appends an entry; Clear-answers wipes it
+let qaHistory = []; // { question, context, answer, time }
+
+// Block 6 — scroll lock helper. Returns true when the panel is scrolled within
+// 60 px of the bottom; callers gate auto-scroll on this so user-initiated
+// scroll-up isn't fought every time new content arrives.
+function isNearBottom(el) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+}
 
 // ── Window controls ───────────────────────────────────────────────────────────
 btnClose.addEventListener('click',    () => window.meetAPI.close());
@@ -205,8 +218,12 @@ function appendTranscriptLine(text) {
   line.appendChild(textSpan);
   transcriptBody.appendChild(line);
 
-  // Auto-scroll to bottom
-  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+  // Auto-scroll only when the user is already near the bottom (Block 6 scroll
+  // lock). Archived 2026-05-20: unconditional scroll → isNearBottom-guarded.
+  // transcriptBody.scrollTop = transcriptBody.scrollHeight;
+  if (isNearBottom(transcriptBody)) {
+    transcriptBody.scrollTop = transcriptBody.scrollHeight;
+  }
 }
 
 // ── Audio capture & chunking ──────────────────────────────────────────────────
@@ -359,22 +376,47 @@ The user may be reading your answer while on a live call, so be fast and clear.`
 
 // Block 3 — real Ask handler. Builds the messages array from the context bar
 // (if has-content) + the question, then kicks off the streaming SSE call.
-function handleAsk() {
-  const contextText = selectedTextDisplay.textContent.trim();
-  const question    = questionInput.value.trim();
+//
+// Archived 2026-05-20: Block 3 version didn't pass questionText/contextText
+// through to streamAnswer (Block 6 needs them for the Q&A history block
+// rendered above each answer). Kept per archive rule.
+//
+// function handleAsk() {
+//   const contextText = selectedTextDisplay.textContent.trim();
+//   const question    = questionInput.value.trim();
+//
+//   const messages = buildMessages(contextText, question);
+//   if (!messages) {
+//     selectedTextDisplay.style.borderColor = 'rgba(255,80,80,0.6)';
+//     setTimeout(() => {
+//       selectedTextDisplay.style.borderColor = '';
+//     }, 800);
+//     return;
+//   }
+//
+//   questionInput.value = '';
+//   streamAnswer(messages);
+// }
 
-  const messages = buildMessages(contextText, question);
+// Block 6 — handler now forwards questionText + contextText so streamAnswer
+// can render a Q header above each appended answer block. Empty-context is
+// gated via the has-content class so the placeholder text isn't sent as
+// "context".
+function handleAsk() {
+  const contextText = selectedTextDisplay.classList.contains('has-content')
+    ? selectedTextDisplay.textContent.trim()
+    : '';
+  const questionText = questionInput.value.trim();
+
+  const messages = buildMessages(contextText, questionText);
   if (!messages) {
-    // Flash the context bar to indicate nothing to send
     selectedTextDisplay.style.borderColor = 'rgba(255,80,80,0.6)';
-    setTimeout(() => {
-      selectedTextDisplay.style.borderColor = '';
-    }, 800);
+    setTimeout(() => { selectedTextDisplay.style.borderColor = ''; }, 800);
     return;
   }
 
   questionInput.value = '';
-  streamAnswer(messages);
+  streamAnswer(messages, questionText, contextText);
 }
 
 // Block 3 — message builder. Returns null when neither context nor question
@@ -409,15 +451,110 @@ function buildMessages(contextText, question) {
 // Block 3 — SSE streaming call to OpenAI chat completions. The model defaults
 // to gpt-4o-mini (cheap + fast); Block 4 will add a selector that writes
 // STORAGE_KEY_MODEL.
-async function streamAnswer(messages) {
+//
+// Archived 2026-05-20: Block 3 version replaced the entire answer panel
+// every call (innerHTML = ''), so there was no Q&A history and the last
+// answer was the only thing visible. Block 6 appends a new qa-block per
+// call, preserves history, and pushes to qaHistory. Kept per archive rule.
+//
+// async function streamAnswer(messages) {
+//   const apiKey = getApiKey();
+//   if (!apiKey) {
+//     showAnswerError('No API key — add it in Settings ⚙');
+//     return;
+//   }
+//
+//   answerBody.innerHTML = '<p class="answer-streaming">thinking...</p>';
+//   btnAsk.disabled = true;
+//   btnAsk.textContent = '...';
+//
+//   let fullText = '';
+//
+//   try {
+//     const response = await fetch('https://api.openai.com/v1/chat/completions', { ... });
+//     if (!response.ok) {
+//       const err = await response.json().catch(() => ({}));
+//       showAnswerError(`API error: ${err?.error?.message || response.status}`);
+//       return;
+//     }
+//     const reader  = response.body.getReader();
+//     const decoder = new TextDecoder();
+//     answerBody.innerHTML = '';
+//     const answerEl = document.createElement('p');
+//     answerEl.className = 'answer-text';
+//     answerBody.appendChild(answerEl);
+//     while (true) {
+//       const { done, value } = await reader.read();
+//       if (done) break;
+//       const chunk = decoder.decode(value, { stream: true });
+//       const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+//       for (const line of lines) {
+//         const data = line.slice(6);
+//         if (data === '[DONE]') break;
+//         try {
+//           const parsed = JSON.parse(data);
+//           const delta  = parsed.choices?.[0]?.delta?.content || '';
+//           fullText += delta;
+//           answerEl.textContent = fullText;
+//           answerBody.scrollTop = answerBody.scrollHeight; // unconditional scroll
+//         } catch {}
+//       }
+//     }
+//   } catch (err) {
+//     showAnswerError(`Network error: ${err.message}`);
+//   } finally {
+//     btnAsk.disabled = false;
+//     btnAsk.textContent = 'Ask';
+//   }
+// }
+
+// Block 6 — append-mode streaming with Q header and scroll lock. Each ask
+// builds a fresh .qa-block (question line + answer paragraph + divider),
+// appends it to #answer-body, streams into the answer paragraph, and pushes
+// the final answer into qaHistory when done.
+async function streamAnswer(messages, questionText, contextText) {
   const apiKey = getApiKey();
   if (!apiKey) {
     showAnswerError('No API key — add it in Settings ⚙');
     return;
   }
 
-  // Show loading state
-  answerBody.innerHTML = '<p class="answer-streaming">thinking...</p>';
+  // Remove placeholder if present (first ask of the session)
+  const placeholder = answerBody.querySelector('.placeholder-text');
+  if (placeholder) placeholder.remove();
+
+  // Create a new Q&A block and append it
+  const qaBlock = document.createElement('div');
+  qaBlock.className = 'qa-block';
+
+  // Question header (skipped if neither question nor context — shouldn't happen
+  // since buildMessages returns null in that case, but defensive)
+  if (questionText || contextText) {
+    const qHeader = document.createElement('div');
+    qHeader.className = 'qa-question';
+    qHeader.textContent = questionText
+      ? `Q: ${questionText}`
+      : 'Q: (summarize selected context)';
+    qaBlock.appendChild(qHeader);
+  }
+
+  // Answer text element (gets populated as the stream arrives)
+  const answerEl = document.createElement('p');
+  answerEl.className = 'answer-text';
+  answerEl.textContent = 'thinking...';
+  qaBlock.appendChild(answerEl);
+
+  // Divider below this block — separates it from the next ask
+  const divider = document.createElement('div');
+  divider.className = 'qa-divider';
+  qaBlock.appendChild(divider);
+
+  answerBody.appendChild(qaBlock);
+
+  // Always scroll to show the newly-appended block (initial reveal — the
+  // scroll-lock check kicks in for subsequent token-by-token updates).
+  answerBody.scrollTop = answerBody.scrollHeight;
+
   btnAsk.disabled = true;
   btnAsk.textContent = '...';
 
@@ -441,18 +578,15 @@ async function streamAnswer(messages) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      showAnswerError(`API error: ${err?.error?.message || response.status}`);
+      answerEl.textContent = `API error: ${err?.error?.message || response.status}`;
+      answerEl.className = 'answer-error';
       return;
     }
 
     // Stream SSE response
     const reader  = response.body.getReader();
     const decoder = new TextDecoder();
-    answerBody.innerHTML = '';
-
-    const answerEl = document.createElement('p');
-    answerEl.className = 'answer-text';
-    answerBody.appendChild(answerEl);
+    answerEl.textContent = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -462,7 +596,7 @@ async function streamAnswer(messages) {
       const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
 
       for (const line of lines) {
-        const data = line.slice(6); // remove 'data: '
+        const data = line.slice(6);
         if (data === '[DONE]') break;
 
         try {
@@ -470,16 +604,28 @@ async function streamAnswer(messages) {
           const delta  = parsed.choices?.[0]?.delta?.content || '';
           fullText += delta;
           answerEl.textContent = fullText;
-          // Auto-scroll answer panel
-          answerBody.scrollTop = answerBody.scrollHeight;
+
+          // Scroll lock — only auto-scroll if user is near the bottom
+          if (isNearBottom(answerBody)) {
+            answerBody.scrollTop = answerBody.scrollHeight;
+          }
         } catch {
           // Skip malformed SSE chunks
         }
       }
     }
 
+    // Save to history
+    qaHistory.push({
+      question: questionText || '',
+      context:  contextText  || '',
+      answer:   fullText,
+      time:     new Date()
+    });
+
   } catch (err) {
-    showAnswerError(`Network error: ${err.message}`);
+    answerEl.textContent = `Network error: ${err.message}`;
+    answerEl.className = 'answer-error';
   } finally {
     btnAsk.disabled = false;
     btnAsk.textContent = 'Ask';
@@ -645,13 +791,33 @@ function clearContext() {
   selectedTextDisplay.classList.remove('has-content');
 }
 
-// ── Wire context Clear + answer Copy buttons (Block 3) ──────────────────────
+// ── Wire context Clear + answer Clear/Copy buttons (Block 3 + Block 6) ──────
 btnClearContext.addEventListener('click', clearContext);
 
+// Block 6 — Clear all Q&A history (wipes qaHistory + restores placeholder)
+btnClearAnswers.addEventListener('click', () => {
+  qaHistory = [];
+  answerBody.innerHTML = '<p class="placeholder-text">Your answer will appear here...</p>';
+});
+
+// Archived 2026-05-20: Block 3 Copy handler grabbed ALL of answerBody.innerText,
+// which under Block 6's append-mode includes every past answer + Q headers +
+// divider whitespace. Replaced with a version that copies only the most recent
+// answer from qaHistory. Kept per archive rule.
+//
+// btnCopyAnswer.addEventListener('click', () => {
+//   const text = answerBody.innerText.trim();
+//   if (!text || text === 'Your answer will appear here...') return;
+//   navigator.clipboard.writeText(text);
+//   btnCopyAnswer.textContent = 'Copied!';
+//   setTimeout(() => btnCopyAnswer.textContent = 'Copy', 2000);
+// });
+
+// Block 6 — Copy LAST answer only (from qaHistory tail)
 btnCopyAnswer.addEventListener('click', () => {
-  const text = answerBody.innerText.trim();
-  if (!text || text === 'Your answer will appear here...') return;
-  navigator.clipboard.writeText(text);
+  if (qaHistory.length === 0) return;
+  const lastAnswer = qaHistory[qaHistory.length - 1].answer;
+  navigator.clipboard.writeText(lastAnswer);
   btnCopyAnswer.textContent = 'Copied!';
   setTimeout(() => btnCopyAnswer.textContent = 'Copy', 2000);
 });

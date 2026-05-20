@@ -39,13 +39,15 @@ function createWindow() {
   });
 
   // Hide from screen share — critical stealth feature
-  // mainWindow.setContentProtection(true);  // re-enable before shipping
+  // Block 6 — pre-ship cleanup: re-enabled (was commented out in Block 2 dev mode)
+  mainWindow.setContentProtection(true);
 
   // Load the UI
   mainWindow.loadFile('index.html');
 
   // Open DevTools in dev — comment out before shipping
-  mainWindow.webContents.openDevTools({ mode: 'detach' });
+  // Block 6 — pre-ship cleanup: commented out (was uncommented in Block 2 dev mode)
+  // mainWindow.webContents.openDevTools({ mode: 'detach' });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }

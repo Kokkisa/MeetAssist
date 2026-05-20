@@ -122,9 +122,20 @@
          Original line kept here for reference per archive rule:
            <div class="panel-label">🤖 Answer</div>
     -->
+    <!-- Block 6 — archived 2026-05-20: single Copy button, no Clear.
+         Replaced by an answer-header-controls wrapper that holds the new
+         Clear button alongside Copy. Kept here for reference per archive rule:
+           <div class="answer-header">
+             <div class="panel-label">🤖 Answer</div>
+             <button class="small-btn" id="btn-copy-answer" title="Copy answer">Copy</button>
+           </div>
+    -->
     <div class="answer-header">
       <div class="panel-label">🤖 Answer</div>
-      <button class="small-btn" id="btn-copy-answer" title="Copy answer">Copy</button>
+      <div class="answer-header-controls">
+        <button class="small-btn" id="btn-clear-answers" title="Clear all answers">Clear</button>
+        <button class="small-btn" id="btn-copy-answer"  title="Copy last answer">Copy</button>
+      </div>
     </div>
     <div id="answer-body">
       <p class="placeholder-text">Your answer will appear here...</p>

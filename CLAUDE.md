@@ -1,4 +1,4 @@
-# CLAUDE.md — MeetAssist Block 5 (v0.5.0)
+# CLAUDE.md — MeetAssist Block 6 (v0.6.0)
 
 ## Context
 
@@ -6,11 +6,12 @@ Block 1 (v0.1.0) — Electron shell, overlay window, layout skeleton ✅
 Block 2 (v0.2.0) — System audio capture, Whisper transcription, live transcript ✅
 Block 3 (v0.3.0) — Text selection, context bar, AI answer streaming ✅
 Block 4 (v0.4.0) — Timestamps, model selector, language setting, chunk size ✅
+Block 5 (v0.5.0) — Save transcript to disk with native dialog ✅
 Repo: https://github.com/Kokkisa/MeetAssist
-Current commit: bd58b1c
+Current commit: 4603178
 
 Read ALL existing source files before touching anything.
-Build Block 5 features on top of Block 4. Do NOT rewrite or restructure anything.
+Build Block 6 features on top of Block 5. Do NOT rewrite or restructure anything.
 
 ## ARCHIVE RULE (mandatory)
 Never delete working code. Comment it out with reason and date.
@@ -18,193 +19,361 @@ Always commit a WIP state before trying alternative approaches.
 
 ---
 
-## Block 5 Goal
+## Block 6 Goal
 
-Wire up the existing Save button in the transcript header to export the
-full transcript to a .txt file on disk, using Electron's native save dialog.
+Four improvements before shipping v1.0.0:
 
-Block 5 is done when:
-- User clicks Save → native Windows save dialog appears
-- Default filename is auto-generated: MeetAssist_YYYY-MM-DD_HH-MM.txt
-- File contains all transcript lines with timestamps
-- Success/failure message shown briefly in the transcript header
-- Committed and pushed as v0.5.0
+1. **Q&A History** — append each Q&A pair to the answer panel instead of
+   replacing. User can scroll back through all previous answers in the session.
+2. **Scroll lock** — answer panel does NOT auto-scroll if user has manually
+   scrolled up. Only auto-scrolls when user is already near the bottom.
+3. **UI polish** — better spacing, cleaner fonts, resize handle, overall
+   visual tightening.
+4. **Pre-ship cleanup** — re-enable setContentProtection (stealth mode on),
+   comment out openDevTools.
 
----
-
-## Architecture
-
-```
-renderer.js (Save button click)
-    ↓ IPC invoke('save-transcript', { filename, content })
-main.js (shows native dialog, writes file)
-    ↓ returns { success, filePath, error }
-renderer.js (shows success/error message)
-```
+Block 6 is done when all 4 features work and the app is committed as v0.6.0.
 
 ---
 
-## Step 1 — main.js changes
+## Feature 1 — Q&A History
 
-### Add fs and dialog to requires:
+### Current behaviour (Block 3/5)
+`streamAnswer()` clears `answerBody.innerHTML` at the start of every call,
+replacing the previous answer. Only one answer visible at a time.
 
+### New behaviour
+Each Q&A pair is appended as a new block at the BOTTOM of the answer panel.
+Previous answers remain visible — user can scroll up to read them.
+A faint divider separates each pair.
+A "Clear answers" button wipes the full history.
+
+### Changes to renderer.js
+
+#### Add qaHistory array (alongside other state vars):
 ```javascript
-const { app, BrowserWindow, globalShortcut, ipcMain, screen,
-        dialog } = require('electron');
-const fs = require('fs');
+let qaHistory = []; // { question, context, answer, time }
 ```
 
-### Add IPC handler for save-transcript (add after existing IPC handlers):
+#### Add "Clear answers" button to answer panel header in index.html:
+The existing answer header already has Copy button. Add Clear Answers next to it:
 
+```html
+<div class="answer-header">
+  <div class="panel-label">🤖 Answer</div>
+  <div class="answer-header-controls">
+    <button class="small-btn" id="btn-clear-answers" title="Clear all answers">Clear</button>
+    <button class="small-btn" id="btn-copy-answer"  title="Copy last answer">Copy</button>
+  </div>
+</div>
+```
+
+Archive the existing answer-header HTML with a comment above it:
+```html
+<!-- Archived 2026-05-20 — single Copy button, no Clear. Replaced by answer-header-controls -->
+```
+
+#### New DOM ref (add to renderer.js refs section):
 ```javascript
-ipcMain.handle('save-transcript', async (event, { filename, content }) => {
-  try {
-    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
-      title:       'Save Transcript',
-      defaultPath: filename,
-      filters:     [
-        { name: 'Text Files', extensions: ['txt'] },
-        { name: 'All Files',  extensions: ['*']   }
-      ]
-    });
+const btnClearAnswers = document.getElementById('btn-clear-answers');
+```
 
-    if (canceled || !filePath) {
-      return { success: false, canceled: true };
-    }
-
-    fs.writeFileSync(filePath, content, 'utf8');
-    return { success: true, filePath };
-
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
+#### Wire Clear answers button:
+```javascript
+btnClearAnswers.addEventListener('click', () => {
+  qaHistory = [];
+  answerBody.innerHTML = '<p class="placeholder-text">Your answer will appear here...</p>';
 });
 ```
 
----
-
-## Step 2 — preload.js changes
-
-### Expose saveTranscript on meetAPI:
-
+#### Update Copy button to copy LAST answer only:
+Find existing btnCopyAnswer handler. Archive it. Replace with:
 ```javascript
-saveTranscript: (filename, content) =>
-  ipcRenderer.invoke('save-transcript', { filename, content }),
+// Archived 2026-05-20 — copied all answerBody text including history dividers
+// btnCopyAnswer.addEventListener('click', () => { ... });
+
+btnCopyAnswer.addEventListener('click', () => {
+  if (qaHistory.length === 0) return;
+  const lastAnswer = qaHistory[qaHistory.length - 1].answer;
+  navigator.clipboard.writeText(lastAnswer);
+  btnCopyAnswer.textContent = 'Copied!';
+  setTimeout(() => btnCopyAnswer.textContent = 'Copy', 2000);
+});
 ```
 
----
+#### Refactor streamAnswer() to append instead of replace:
 
-## Step 3 — renderer.js changes
-
-### Replace the existing Save button placeholder handler:
-
-Find the existing `btnSaveTranscript` handler (currently shows an alert 
-"Save transcript — coming in Block 6"). Archive it and replace:
+Find the existing `streamAnswer(messages)` function.
+Archive the entire function with a block comment.
+Replace with this new version:
 
 ```javascript
-// Archived 2026-05-20 — placeholder alert from Block 1
-// btnSaveTranscript.addEventListener('click', () => {
-//   alert('Save transcript — coming in Block 6');
-// });
+// Archived 2026-05-20 — replaced the answer panel on every call (no history)
+// async function streamAnswer(messages) { ... }
 
-btnSaveTranscript.addEventListener('click', saveTranscriptToDisk);
-
-async function saveTranscriptToDisk() {
-  if (!transcriptLines || transcriptLines.length === 0) {
-    showTranscriptStatus('Nothing to save yet.', 'warn');
+async function streamAnswer(messages, questionText, contextText) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    showAnswerError('No API key — add it in Settings ⚙');
     return;
   }
 
-  // Build filename: MeetAssist_YYYY-MM-DD_HH-MM.txt
-  const now      = new Date();
-  const date     = now.toISOString().slice(0, 10);           // YYYY-MM-DD
-  const time     = now.toTimeString().slice(0, 5).replace(':', '-'); // HH-MM
-  const filename = `MeetAssist_${date}_${time}.txt`;
+  // Remove placeholder if present
+  const placeholder = answerBody.querySelector('.placeholder-text');
+  if (placeholder) placeholder.remove();
 
-  // Build file content
-  const header  = `MeetAssist Transcript\n`;
-  const dateLine = `Date: ${now.toDateString()} ${now.toTimeString().slice(0,8)}\n`;
-  const divider = `${'─'.repeat(50)}\n\n`;
+  // Create a new Q&A block and append it
+  const qaBlock = document.createElement('div');
+  qaBlock.className = 'qa-block';
 
-  const lines = transcriptLines
-    .map(entry => {
-      const ts = entry.time instanceof Date
-        ? entry.time.toTimeString().slice(0, 8)
-        : '--:--:--';
-      return `[${ts}] ${entry.text}`;
-    })
-    .join('\n');
+  // Question header
+  if (questionText || contextText) {
+    const qHeader = document.createElement('div');
+    qHeader.className = 'qa-question';
+    qHeader.textContent = questionText
+      ? `Q: ${questionText}`
+      : 'Q: (summarize selected context)';
+    qaBlock.appendChild(qHeader);
+  }
 
-  const content = header + dateLine + divider + lines + '\n';
+  // Answer text element
+  const answerEl = document.createElement('p');
+  answerEl.className = 'answer-text';
+  answerEl.textContent = 'thinking...';
+  qaBlock.appendChild(answerEl);
 
-  // Disable button while saving
-  btnSaveTranscript.disabled = true;
-  btnSaveTranscript.textContent = '...';
+  // Divider below this block
+  const divider = document.createElement('div');
+  divider.className = 'qa-divider';
+  qaBlock.appendChild(divider);
+
+  answerBody.appendChild(qaBlock);
+
+  // Scroll to show new block
+  answerBody.scrollTop = answerBody.scrollHeight;
+
+  btnAsk.disabled = true;
+  btnAsk.textContent = '...';
+
+  let fullText = '';
 
   try {
-    const result = await window.meetAPI.saveTranscript(filename, content);
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model:       localStorage.getItem(STORAGE_KEY_MODEL) || 'gpt-4o-mini',
+        messages:    messages,
+        max_tokens:  500,
+        stream:      true,
+        temperature: 0.3
+      })
+    });
 
-    if (result.canceled) {
-      showTranscriptStatus('Save cancelled.', 'warn');
-    } else if (result.success) {
-      // Show just the filename, not the full path
-      const saved = result.filePath.split(/[\\/]/).pop();
-      showTranscriptStatus(`Saved: ${saved}`, 'success');
-    } else {
-      showTranscriptStatus(`Save failed: ${result.error}`, 'error');
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      answerEl.textContent = `API error: ${err?.error?.message || response.status}`;
+      answerEl.className = 'answer-error';
+      return;
     }
+
+    // Stream SSE response
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    answerEl.textContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+
+      for (const line of lines) {
+        const data = line.slice(6);
+        if (data === '[DONE]') break;
+
+        try {
+          const parsed = JSON.parse(data);
+          const delta  = parsed.choices?.[0]?.delta?.content || '';
+          fullText += delta;
+          answerEl.textContent = fullText;
+
+          // Scroll lock — only auto-scroll if user is near the bottom
+          if (isNearBottom(answerBody)) {
+            answerBody.scrollTop = answerBody.scrollHeight;
+          }
+        } catch {
+          // Skip malformed SSE chunks
+        }
+      }
+    }
+
+    // Save to history
+    qaHistory.push({
+      question: questionText || '',
+      context:  contextText  || '',
+      answer:   fullText,
+      time:     new Date()
+    });
+
   } catch (err) {
-    showTranscriptStatus(`Error: ${err.message}`, 'error');
+    answerEl.textContent = `Network error: ${err.message}`;
+    answerEl.className = 'answer-error';
   } finally {
-    btnSaveTranscript.disabled = false;
-    btnSaveTranscript.textContent = 'Save';
+    btnAsk.disabled = false;
+    btnAsk.textContent = 'Ask';
   }
 }
 ```
 
-### Add showTranscriptStatus helper:
+#### Update handleAsk() to pass question and context to streamAnswer:
+
+Find the existing handleAsk() function. Archive it. Replace:
 
 ```javascript
-let statusTimer = null;
+// Archived 2026-05-20 — did not pass questionText/contextText to streamAnswer
+// function handleAsk() { ... }
 
-function showTranscriptStatus(message, type = 'success') {
-  // Remove any existing status
-  const existing = document.getElementById('transcript-status');
-  if (existing) existing.remove();
-  if (statusTimer) clearTimeout(statusTimer);
+function handleAsk() {
+  const contextText = selectedTextDisplay.classList.contains('has-content')
+    ? selectedTextDisplay.textContent.trim()
+    : '';
+  const questionText = questionInput.value.trim();
 
-  const status = document.createElement('span');
-  status.id          = 'transcript-status';
-  status.className   = `transcript-status ${type}`;
-  status.textContent = message;
+  const messages = buildMessages(contextText, questionText);
+  if (!messages) {
+    selectedTextDisplay.style.borderColor = 'rgba(255,80,80,0.6)';
+    setTimeout(() => { selectedTextDisplay.style.borderColor = ''; }, 800);
+    return;
+  }
 
-  // Insert after the transcript-header div
-  const header = document.getElementById('transcript-header');
-  header.insertAdjacentElement('afterend', status);
-
-  // Auto-remove after 3 seconds
-  statusTimer = setTimeout(() => {
-    status.remove();
-    statusTimer = null;
-  }, 3000);
+  questionInput.value = '';
+  streamAnswer(messages, questionText, contextText);
 }
 ```
 
 ---
 
-## Step 4 — CSS additions (styles.css)
+## Feature 2 — Scroll Lock
 
-```css
-/* Transcript status message */
-.transcript-status {
-  display:     block;
-  font-size:   10px;
-  padding:     3px 10px;
-  flex-shrink: 0;
+### Add isNearBottom helper to renderer.js:
+
+```javascript
+// Scroll lock helper — returns true if panel is scrolled near the bottom
+function isNearBottom(el) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
 }
-.transcript-status.success { color: #00c864; }
-.transcript-status.warn    { color: #f0a500; }
-.transcript-status.error   { color: #ff6b6b; }
+```
+
+Place this function near the top of renderer.js, after state variables.
+
+### Apply scroll lock to transcript panel too:
+
+Find the existing `appendTranscriptLine()` function.
+Find this line:
+```javascript
+transcriptBody.scrollTop = transcriptBody.scrollHeight;
+```
+Replace with:
+```javascript
+if (isNearBottom(transcriptBody)) {
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+}
+```
+
+---
+
+## Feature 3 — UI Polish
+
+### CSS additions and updates (styles.css)
+
+#### Q&A history block styles:
+```css
+/* ── Q&A HISTORY ──────────────────────────────────────── */
+.qa-block {
+  margin-bottom: 4px;
+}
+
+.qa-question {
+  font-size:     10px;
+  font-weight:   600;
+  color:         var(--text-accent);
+  padding:       6px 0 2px;
+  line-height:   1.4;
+  word-break:    break-word;
+}
+
+.qa-divider {
+  height:        1px;
+  background:    rgba(255,255,255,0.06);
+  margin:        8px 0 4px;
+}
+
+/* ── ANSWER HEADER CONTROLS ───────────────────────────── */
+.answer-header-controls {
+  display: flex;
+  gap:     4px;
+}
+```
+
+#### General UI polish:
+```css
+/* ── UI POLISH ────────────────────────────────────────── */
+
+/* Slightly tighter panel label */
+.panel-label {
+  font-size:   10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* Smoother scrollbars on all panels */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+
+/* Resize handle — bottom-right corner */
+body {
+  resize:   both;
+  overflow: hidden;
+}
+
+/* Selected text highlight in transcript */
+::selection {
+  background: rgba(79,142,247,0.35);
+  color:      var(--text-primary);
+}
+```
+
+---
+
+## Feature 4 — Pre-ship Cleanup
+
+### main.js — flip both dev-mode toggles:
+
+#### Re-enable stealth mode:
+Find the commented-out line:
+```javascript
+// mainWindow.setContentProtection(true);  // re-enable before shipping
+```
+Uncomment it:
+```javascript
+mainWindow.setContentProtection(true);
+```
+
+#### Close DevTools:
+Find the uncommented line:
+```javascript
+mainWindow.webContents.openDevTools({ mode: 'detach' });
+```
+Comment it out:
+```javascript
+// mainWindow.webContents.openDevTools({ mode: 'detach' }); // dev only
 ```
 
 ---
@@ -213,36 +382,29 @@ function showTranscriptStatus(message, type = 'success') {
 
 | File | Changes |
 |---|---|
-| main.js | Add dialog to electron require, add fs require, add ipcMain.handle('save-transcript') |
-| preload.js | Expose saveTranscript on meetAPI |
-| renderer.js | Archive placeholder Save handler, add saveTranscriptToDisk(), add showTranscriptStatus() |
-| styles.css | Add .transcript-status styles |
+| main.js | Re-enable setContentProtection, comment out openDevTools |
+| renderer.js | Add qaHistory state, add isNearBottom helper, add btnClearAnswers ref + handler, update btnCopyAnswer to copy last answer, archive + replace streamAnswer, archive + replace handleAsk, apply scroll lock to appendTranscriptLine |
+| index.html | Update answer-header to include Clear + Copy in answer-header-controls div |
+| styles.css | Add .qa-block, .qa-question, .qa-divider, .answer-header-controls, UI polish rules |
 
-DO NOT touch index.html — Save button already exists from Block 1.
-DO NOT touch audio capture, transcription, or AI streaming code.
-DO NOT touch any Block 1-4 features.
-
----
-
-## Pre-ship checklist (do NOT do this now — only before final release)
-- [ ] Re-enable setContentProtection(true) in main.js
-- [ ] Comment out openDevTools in main.js
+DO NOT touch preload.js — no changes needed.
+DO NOT touch audio capture, Whisper, or save-to-disk code.
 
 ---
 
-## Definition of done — Block 5
+## Definition of done — Block 6
 
-- [ ] Save button click → native Windows save dialog appears
-- [ ] Default filename is MeetAssist_YYYY-MM-DD_HH-MM.txt
-- [ ] Saved file contains header + date + all timestamped lines
-- [ ] Success message shows saved filename briefly
-- [ ] Cancelled dialog shows "Save cancelled" message
-- [ ] Empty transcript shows "Nothing to save yet" message
-- [ ] Save button disabled during save operation
-- [ ] All 4 source files modified correctly
-- [ ] Committed and pushed as v0.5.0
+- [ ] Each Ask appends a new Q&A block — previous answers stay visible
+- [ ] Q question header shows above each answer in accent color
+- [ ] Clear answers button wipes all history
+- [ ] Copy button copies only the LAST answer
+- [ ] Answer panel does NOT auto-scroll when user has scrolled up
+- [ ] Transcript panel does NOT auto-scroll when user has scrolled up
+- [ ] Stealth mode on — overlay hidden from screen share
+- [ ] DevTools closed on launch
+- [ ] UI looks polished and clean
+- [ ] Committed and pushed as v0.6.0
 
-## What Block 6 will add
-UI polish — better fonts, spacing, resize handle, stealth mode
-re-enabled, DevTools closed, final pre-ship cleanup.
-Then Block 7 builds the installer.
+## What Block 7 will add
+Build the installer (npm run build), test the .exe,
+create desktop shortcut, ship v1.0.0.

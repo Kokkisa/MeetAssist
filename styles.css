@@ -443,3 +443,58 @@ select:focus { border-color: rgba(79,142,247,0.50); }
 .transcript-status.success { color: #00c864; }
 .transcript-status.warn    { color: #f0a500; }
 .transcript-status.error   { color: #ff6b6b; }
+
+/* ── BLOCK 6 — Q&A HISTORY ────────────────────────────── */
+.qa-block {
+  margin-bottom: 4px;
+}
+
+.qa-question {
+  font-size:     10px;
+  font-weight:   600;
+  color:         var(--text-accent);
+  padding:       6px 0 2px;
+  line-height:   1.4;
+  word-break:    break-word;
+}
+
+.qa-divider {
+  height:        1px;
+  background:    rgba(255,255,255,0.06);
+  margin:        8px 0 4px;
+}
+
+/* ── BLOCK 6 — ANSWER HEADER CONTROLS ──────────────────── */
+.answer-header-controls {
+  display: flex;
+  gap:     4px;
+}
+
+/* ── BLOCK 6 — UI POLISH ──────────────────────────────── */
+
+/* Slightly tighter panel label (overrides 3 properties of the earlier rule
+   intentionally; the original rule's color/text-transform/padding still apply
+   via the cascade). */
+.panel-label {
+  font-size:      10px;
+  font-weight:    700;
+  letter-spacing: 1px;
+}
+
+/* Smoother scrollbars on all panels */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+
+/* Resize handle — bottom-right corner */
+body {
+  resize:   both;
+  overflow: hidden;
+}
+
+/* Selected text highlight in transcript */
+::selection {
+  background: rgba(79,142,247,0.35);
+  color:      var(--text-primary);
+}
