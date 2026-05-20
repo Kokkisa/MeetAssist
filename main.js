@@ -73,6 +73,11 @@ app.whenReady().then(() => {
 ipcMain.on('win-close',   () => { if (mainWindow) mainWindow.close(); });
 ipcMain.on('win-hide',    () => { if (mainWindow) mainWindow.hide();  });
 ipcMain.on('win-minimise',() => { if (mainWindow) mainWindow.minimize(); });
+ipcMain.on('win-maximise',() => {
+  if (mainWindow) {
+    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+  }
+});
 
 // IPC — desktop capturer screen-source list (LCA audio-capture pattern).
 // Renderer picks sources[0] and feeds its id into getUserMedia.

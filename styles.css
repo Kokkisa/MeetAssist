@@ -16,7 +16,7 @@
   --danger:        #ff4f4f;
   --radius:        8px;
   --radius-sm:     4px;
-  --font:          -apple-system, 'Segoe UI', sans-serif;
+  --font:          'Inter', -apple-system, 'Segoe UI', sans-serif;
 }
 
 html, body {

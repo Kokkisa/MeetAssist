@@ -4,6 +4,7 @@
 const btnClose           = document.getElementById('btn-close');
 const btnHide            = document.getElementById('btn-hide');
 const btnMinimise        = document.getElementById('btn-minimise');
+const btnMaximise        = document.getElementById('btn-maximise');
 const btnAsk             = document.getElementById('btn-ask');
 const btnClearTranscript = document.getElementById('btn-clear-transcript');
 const btnSaveTranscript  = document.getElementById('btn-save-transcript');
@@ -56,6 +57,7 @@ function isNearBottom(el) {
 btnClose.addEventListener('click',    () => window.meetAPI.close());
 btnHide.addEventListener('click',     () => window.meetAPI.hide());
 btnMinimise.addEventListener('click', () => window.meetAPI.minimise());
+btnMaximise.addEventListener('click', () => window.meetAPI.maximise());
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY_APIKEY = 'meetassist_openai_key';
