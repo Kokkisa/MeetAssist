@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeetAssist</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ── HEADER ─────────────────────────────────────────── -->
+  <div id="header">
+    <div id="app-name">
+      <span class="dot"></span>
+      MeetAssist
+    </div>
+    <div id="win-controls">
+      <button class="ctrl-btn" id="btn-minimise" title="Minimise">─</button>
+      <button class="ctrl-btn" id="btn-hide"     title="Hide (Ctrl+Shift+M to show)">◱</button>
+      <button class="ctrl-btn danger" id="btn-close" title="Close">✕</button>
+    </div>
+  </div>
+
+  <!-- ── TRANSCRIPT PANEL ───────────────────────────────── -->
+  <div id="transcript-panel">
+    <div id="transcript-header">
+      <span class="panel-label">📝 Live Transcript</span>
+      <div id="transcript-controls">
+        <button class="small-btn" id="btn-clear-transcript" title="Clear transcript">Clear</button>
+        <button class="small-btn" id="btn-save-transcript"  title="Save transcript">Save</button>
+      </div>
+    </div>
+    <div id="transcript-body">
+      <p class="placeholder-text">Transcript will appear here once recording starts...</p>
+    </div>
+  </div>
+
+  <!-- ── CONTEXT BAR ────────────────────────────────────── -->
+  <div id="context-bar">
+    <div class="panel-label">💬 Context &amp; Question</div>
+    <div id="selected-text-display" class="empty-state">
+      Select text from transcript → it appears here
+    </div>
+    <div id="question-row">
+      <input
+        type="text"
+        id="question-input"
+        placeholder="Type your question about the selected context..."
+        autocomplete="off"
+      />
+      <button id="btn-ask">Ask</button>
+    </div>
+  </div>
+
+  <!-- ── ANSWER PANEL ───────────────────────────────────── -->
+  <div id="answer-panel">
+    <div class="panel-label">🤖 Answer</div>
+    <div id="answer-body">
+      <p class="placeholder-text">Your answer will appear here...</p>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
