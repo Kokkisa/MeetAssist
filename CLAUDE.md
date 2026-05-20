@@ -1,15 +1,16 @@
-# CLAUDE.md — MeetAssist Block 4 (v0.4.0)
+# CLAUDE.md — MeetAssist Block 5 (v0.5.0)
 
 ## Context
 
 Block 1 (v0.1.0) — Electron shell, overlay window, layout skeleton ✅
 Block 2 (v0.2.0) — System audio capture, Whisper transcription, live transcript ✅
 Block 3 (v0.3.0) — Text selection, context bar, AI answer streaming ✅
+Block 4 (v0.4.0) — Timestamps, model selector, language setting, chunk size ✅
 Repo: https://github.com/Kokkisa/MeetAssist
-Current commit: bd8c68a
+Current commit: bd58b1c
 
 Read ALL existing source files before touching anything.
-Build Block 4 features on top of Block 3. Do NOT rewrite or restructure anything.
+Build Block 5 features on top of Block 4. Do NOT rewrite or restructure anything.
 
 ## ARCHIVE RULE (mandatory)
 Never delete working code. Comment it out with reason and date.
@@ -17,259 +18,194 @@ Always commit a WIP state before trying alternative approaches.
 
 ---
 
-## Block 4 Goal
+## Block 5 Goal
 
-Four improvements that make MeetAssist more useful in real meetings:
+Wire up the existing Save button in the transcript header to export the
+full transcript to a .txt file on disk, using Electron's native save dialog.
 
-1. **Timestamps on transcript lines** — each line shows the time it was captured (HH:MM:SS)
-2. **Model selector in settings** — user can switch between gpt-4o and gpt-4o-mini
-3. **Language setting** — user can set Whisper transcription language (default: en)
-4. **Chunk size control** — user can change transcription interval (3s / 5s / 10s)
-
-Block 4 is done when:
-- Every transcript line has a timestamp prefix
-- Settings bar has model, language, and chunk size controls
-- All settings persist in localStorage
-- Committed and pushed as v0.4.0
+Block 5 is done when:
+- User clicks Save → native Windows save dialog appears
+- Default filename is auto-generated: MeetAssist_YYYY-MM-DD_HH-MM.txt
+- File contains all transcript lines with timestamps
+- Success/failure message shown briefly in the transcript header
+- Committed and pushed as v0.5.0
 
 ---
 
-## Feature 1 — Timestamps on Transcript Lines
+## Architecture
 
-### How it works
-When `appendTranscriptLine(text)` is called in renderer.js, prepend a
-timestamp showing the wall-clock time the line was captured.
+```
+renderer.js (Save button click)
+    ↓ IPC invoke('save-transcript', { filename, content })
+main.js (shows native dialog, writes file)
+    ↓ returns { success, filePath, error }
+renderer.js (shows success/error message)
+```
 
-### Update appendTranscriptLine in renderer.js
+---
 
-Find the existing `appendTranscriptLine(text)` function and update it.
-Archive the original with a comment, then replace:
+## Step 1 — main.js changes
+
+### Add fs and dialog to requires:
 
 ```javascript
-// Archived 2026-05-20 — no timestamp version
-// function appendTranscriptLine(text) {
-//   const placeholder = transcriptBody.querySelector('.placeholder-text');
-//   if (placeholder) placeholder.remove();
-//   transcriptLines.push({ text, time: new Date() });
-//   const line = document.createElement('p');
-//   line.className = 'transcript-line';
-//   line.textContent = text;
-//   transcriptBody.appendChild(line);
-//   transcriptBody.scrollTop = transcriptBody.scrollHeight;
-// }
+const { app, BrowserWindow, globalShortcut, ipcMain, screen,
+        dialog } = require('electron');
+const fs = require('fs');
+```
 
-function appendTranscriptLine(text) {
-  // Remove placeholder if present
-  const placeholder = transcriptBody.querySelector('.placeholder-text');
-  if (placeholder) placeholder.remove();
+### Add IPC handler for save-transcript (add after existing IPC handlers):
 
-  const now = new Date();
-  transcriptLines.push({ text, time: now });
+```javascript
+ipcMain.handle('save-transcript', async (event, { filename, content }) => {
+  try {
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title:       'Save Transcript',
+      defaultPath: filename,
+      filters:     [
+        { name: 'Text Files', extensions: ['txt'] },
+        { name: 'All Files',  extensions: ['*']   }
+      ]
+    });
 
-  // Format timestamp HH:MM:SS
-  const ts = now.toTimeString().slice(0, 8);
+    if (canceled || !filePath) {
+      return { success: false, canceled: true };
+    }
 
-  const line = document.createElement('p');
-  line.className = 'transcript-line';
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { success: true, filePath };
 
-  const tsSpan = document.createElement('span');
-  tsSpan.className = 'transcript-ts';
-  tsSpan.textContent = ts;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+```
 
-  const textSpan = document.createElement('span');
-  textSpan.className = 'transcript-text';
-  textSpan.textContent = ' ' + text;
+---
 
-  line.appendChild(tsSpan);
-  line.appendChild(textSpan);
-  transcriptBody.appendChild(line);
+## Step 2 — preload.js changes
 
-  // Auto-scroll to bottom
-  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+### Expose saveTranscript on meetAPI:
+
+```javascript
+saveTranscript: (filename, content) =>
+  ipcRenderer.invoke('save-transcript', { filename, content }),
+```
+
+---
+
+## Step 3 — renderer.js changes
+
+### Replace the existing Save button placeholder handler:
+
+Find the existing `btnSaveTranscript` handler (currently shows an alert 
+"Save transcript — coming in Block 6"). Archive it and replace:
+
+```javascript
+// Archived 2026-05-20 — placeholder alert from Block 1
+// btnSaveTranscript.addEventListener('click', () => {
+//   alert('Save transcript — coming in Block 6');
+// });
+
+btnSaveTranscript.addEventListener('click', saveTranscriptToDisk);
+
+async function saveTranscriptToDisk() {
+  if (!transcriptLines || transcriptLines.length === 0) {
+    showTranscriptStatus('Nothing to save yet.', 'warn');
+    return;
+  }
+
+  // Build filename: MeetAssist_YYYY-MM-DD_HH-MM.txt
+  const now      = new Date();
+  const date     = now.toISOString().slice(0, 10);           // YYYY-MM-DD
+  const time     = now.toTimeString().slice(0, 5).replace(':', '-'); // HH-MM
+  const filename = `MeetAssist_${date}_${time}.txt`;
+
+  // Build file content
+  const header  = `MeetAssist Transcript\n`;
+  const dateLine = `Date: ${now.toDateString()} ${now.toTimeString().slice(0,8)}\n`;
+  const divider = `${'─'.repeat(50)}\n\n`;
+
+  const lines = transcriptLines
+    .map(entry => {
+      const ts = entry.time instanceof Date
+        ? entry.time.toTimeString().slice(0, 8)
+        : '--:--:--';
+      return `[${ts}] ${entry.text}`;
+    })
+    .join('\n');
+
+  const content = header + dateLine + divider + lines + '\n';
+
+  // Disable button while saving
+  btnSaveTranscript.disabled = true;
+  btnSaveTranscript.textContent = '...';
+
+  try {
+    const result = await window.meetAPI.saveTranscript(filename, content);
+
+    if (result.canceled) {
+      showTranscriptStatus('Save cancelled.', 'warn');
+    } else if (result.success) {
+      // Show just the filename, not the full path
+      const saved = result.filePath.split(/[\\/]/).pop();
+      showTranscriptStatus(`Saved: ${saved}`, 'success');
+    } else {
+      showTranscriptStatus(`Save failed: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    showTranscriptStatus(`Error: ${err.message}`, 'error');
+  } finally {
+    btnSaveTranscript.disabled = false;
+    btnSaveTranscript.textContent = 'Save';
+  }
 }
 ```
 
-### CSS for timestamp (add to styles.css):
+### Add showTranscriptStatus helper:
+
+```javascript
+let statusTimer = null;
+
+function showTranscriptStatus(message, type = 'success') {
+  // Remove any existing status
+  const existing = document.getElementById('transcript-status');
+  if (existing) existing.remove();
+  if (statusTimer) clearTimeout(statusTimer);
+
+  const status = document.createElement('span');
+  status.id          = 'transcript-status';
+  status.className   = `transcript-status ${type}`;
+  status.textContent = message;
+
+  // Insert after the transcript-header div
+  const header = document.getElementById('transcript-header');
+  header.insertAdjacentElement('afterend', status);
+
+  // Auto-remove after 3 seconds
+  statusTimer = setTimeout(() => {
+    status.remove();
+    statusTimer = null;
+  }, 3000);
+}
+```
+
+---
+
+## Step 4 — CSS additions (styles.css)
 
 ```css
-.transcript-ts {
-  color:         var(--text-secondary);
-  font-size:     10px;
-  font-variant-numeric: tabular-nums;
-  margin-right:  6px;
-  flex-shrink:   0;
-  user-select:   none; /* don't include timestamp in text selection */
+/* Transcript status message */
+.transcript-status {
+  display:     block;
+  font-size:   10px;
+  padding:     3px 10px;
+  flex-shrink: 0;
 }
-
-.transcript-text {
-  color:       var(--text-primary);
-  font-size:   12px;
-  line-height: 1.6;
-}
-
-/* Update transcript-line to use flex for ts + text alignment */
-.transcript-line {
-  display:       flex;
-  align-items:   baseline;
-  padding:       2px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  margin-bottom: 3px;
-  user-select:   text;
-}
+.transcript-status.success { color: #00c864; }
+.transcript-status.warn    { color: #f0a500; }
+.transcript-status.error   { color: #ff6b6b; }
 ```
-
-Note: `.transcript-line` already exists in styles.css from Block 2.
-Replace the existing `.transcript-line` rule with the updated version above.
-Archive the old one with a comment.
-
----
-
-## Feature 2 — Model Selector in Settings
-
-### Add to settings-bar in index.html
-
-The existing settings-bar has one row (API key).
-Add two more rows below it — model selector and language input:
-
-```html
-<!-- Model selector row -->
-<div class="settings-row">
-  <label for="select-model">AI Model</label>
-  <select id="select-model">
-    <option value="gpt-4o-mini">gpt-4o-mini (fast)</option>
-    <option value="gpt-4o">gpt-4o (best)</option>
-  </select>
-</div>
-
-<!-- Language row -->
-<div class="settings-row">
-  <label for="input-language">Whisper Language</label>
-  <input
-    type="text"
-    id="input-language"
-    placeholder="en"
-    maxlength="5"
-    style="max-width: 60px;"
-    autocomplete="off"
-  />
-  <span class="settings-hint">e.g. en, hi, te, fr</span>
-</div>
-
-<!-- Chunk size row -->
-<div class="settings-row">
-  <label for="select-chunk">Chunk Size</label>
-  <select id="select-chunk">
-    <option value="3000">3 seconds</option>
-    <option value="5000" selected>5 seconds (default)</option>
-    <option value="10000">10 seconds</option>
-  </select>
-</div>
-```
-
-Place these rows AFTER the existing API key row, BEFORE the Save button.
-The Save button already exists — do not add another one.
-
-### CSS additions (add to styles.css):
-
-```css
-select {
-  background:    var(--bg-input);
-  border:        1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color:         var(--text-primary);
-  font-size:     11px;
-  padding:       4px 8px;
-  outline:       none;
-  cursor:        pointer;
-}
-select:focus { border-color: rgba(79,142,247,0.50); }
-
-.settings-hint {
-  font-size:  10px;
-  color:      var(--text-secondary);
-  white-space: nowrap;
-}
-```
-
----
-
-## Feature 3 — Wire New Settings in renderer.js
-
-### New storage keys (add alongside existing STORAGE_KEY_APIKEY):
-
-```javascript
-const STORAGE_KEY_MODEL    = 'meetassist_model';    // already exists from Block 3
-const STORAGE_KEY_LANGUAGE = 'meetassist_language';
-const STORAGE_KEY_CHUNK    = 'meetassist_chunk_ms';
-```
-
-Note: STORAGE_KEY_MODEL already exists from Block 3 — do not duplicate it.
-
-### New DOM refs (add after existing refs):
-
-```javascript
-const selectModel    = document.getElementById('select-model');
-const inputLanguage  = document.getElementById('input-language');
-const selectChunk    = document.getElementById('select-chunk');
-```
-
-### Update loadSettings() to load new values:
-
-Find the existing loadSettings() function and extend it:
-
-```javascript
-function loadSettings() {
-  inputApiKey.value      = getApiKey();
-  selectModel.value      = localStorage.getItem(STORAGE_KEY_MODEL)    || 'gpt-4o-mini';
-  inputLanguage.value    = localStorage.getItem(STORAGE_KEY_LANGUAGE)  || 'en';
-  selectChunk.value      = localStorage.getItem(STORAGE_KEY_CHUNK)     || '5000';
-}
-```
-
-### Update saveSettings() to save new values:
-
-Find the existing saveSettings() function and extend it:
-
-```javascript
-function saveSettings() {
-  const key = inputApiKey.value.trim();
-  if (!key) return;
-  localStorage.setItem(STORAGE_KEY_APIKEY,   key);
-  localStorage.setItem(STORAGE_KEY_MODEL,    selectModel.value);
-  localStorage.setItem(STORAGE_KEY_LANGUAGE, inputLanguage.value.trim() || 'en');
-  localStorage.setItem(STORAGE_KEY_CHUNK,    selectChunk.value);
-  settingsBar.classList.add('hidden');
-}
-```
-
-### Update transcribeChunk() to use language setting:
-
-Find the existing `transcribeChunk(audioBlob)` function.
-Find the line: `formData.append('language', 'en');`
-Replace it with:
-```javascript
-formData.append('language', localStorage.getItem(STORAGE_KEY_LANGUAGE) || 'en');
-```
-
-### Update chunk timer to use chunk size setting:
-
-In `startRecording()`, find the line:
-```javascript
-chunkTimer = setTimeout(flushChunk, 5000);
-```
-There are TWO occurrences of this line (one initial, one inside flushChunk for restart).
-Replace BOTH with:
-```javascript
-chunkTimer = setTimeout(flushChunk, parseInt(localStorage.getItem(STORAGE_KEY_CHUNK) || '5000'));
-```
-
-### Update streamAnswer() to use model setting:
-
-The existing streamAnswer() already reads:
-```javascript
-model: localStorage.getItem(STORAGE_KEY_MODEL) || 'gpt-4o-mini',
-```
-This is already correct from Block 3 — no change needed here.
 
 ---
 
@@ -277,13 +213,14 @@ This is already correct from Block 3 — no change needed here.
 
 | File | Changes |
 |---|---|
-| renderer.js | Update appendTranscriptLine (archive old), extend loadSettings + saveSettings, add 3 new DOM refs, add STORAGE_KEY_LANGUAGE + STORAGE_KEY_CHUNK, update transcribeChunk language, update both chunkTimer setTimeout calls |
-| index.html | Add 3 new settings rows (model, language, chunk) inside settings-bar |
-| styles.css | Add .transcript-ts, .transcript-text, update .transcript-line to flex, add select styles, .settings-hint |
+| main.js | Add dialog to electron require, add fs require, add ipcMain.handle('save-transcript') |
+| preload.js | Expose saveTranscript on meetAPI |
+| renderer.js | Archive placeholder Save handler, add saveTranscriptToDisk(), add showTranscriptStatus() |
+| styles.css | Add .transcript-status styles |
 
-DO NOT touch main.js or preload.js.
-DO NOT touch audio capture, Whisper call structure, or AI streaming logic.
-DO NOT touch Block 1/2/3 features — only extend them.
+DO NOT touch index.html — Save button already exists from Block 1.
+DO NOT touch audio capture, transcription, or AI streaming code.
+DO NOT touch any Block 1-4 features.
 
 ---
 
@@ -293,19 +230,19 @@ DO NOT touch Block 1/2/3 features — only extend them.
 
 ---
 
-## Definition of done — Block 4
+## Definition of done — Block 5
 
-- [ ] Every new transcript line shows HH:MM:SS timestamp prefix
-- [ ] Timestamp is not selectable (user-select: none) so it doesn't pollute context
-- [ ] Settings bar has model, language, chunk size rows
-- [ ] Saving settings persists all 4 values to localStorage
-- [ ] Loading app restores all 4 saved values
-- [ ] Whisper uses saved language setting
-- [ ] Chunk timer uses saved chunk size
-- [ ] AI answer uses saved model
-- [ ] No changes to main.js or preload.js
-- [ ] Committed and pushed as v0.4.0
+- [ ] Save button click → native Windows save dialog appears
+- [ ] Default filename is MeetAssist_YYYY-MM-DD_HH-MM.txt
+- [ ] Saved file contains header + date + all timestamped lines
+- [ ] Success message shows saved filename briefly
+- [ ] Cancelled dialog shows "Save cancelled" message
+- [ ] Empty transcript shows "Nothing to save yet" message
+- [ ] Save button disabled during save operation
+- [ ] All 4 source files modified correctly
+- [ ] Committed and pushed as v0.5.0
 
-## What Block 5 will add
-Session save to disk — export full transcript as .txt file with timestamps,
-triggered by the existing Save button in the transcript header.
+## What Block 6 will add
+UI polish — better fonts, spacing, resize handle, stealth mode
+re-enabled, DevTools closed, final pre-ship cleanup.
+Then Block 7 builds the installer.

@@ -498,11 +498,95 @@ btnClearTranscript.addEventListener('click', () => {
   transcriptBody.innerHTML = '<p class="placeholder-text">Transcript cleared.</p>';
 });
 
-// ── Save transcript (placeholder) ─────────────────────────────────────────────
-btnSaveTranscript.addEventListener('click', () => {
-  // Real save comes in Block 6
-  alert('Save transcript — coming in Block 6');
-});
+// ── Save transcript → .txt on disk (Block 5) ────────────────────────────────
+// Archived 2026-05-20: Block 1 placeholder alert. Replaced by real disk save
+// using window.meetAPI.saveTranscript (which round-trips to main and invokes
+// dialog.showSaveDialog + fs.writeFileSync). Kept per archive rule.
+//
+// btnSaveTranscript.addEventListener('click', () => {
+//   // Real save comes in Block 6
+//   alert('Save transcript — coming in Block 6');
+// });
+
+btnSaveTranscript.addEventListener('click', saveTranscriptToDisk);
+
+async function saveTranscriptToDisk() {
+  if (!transcriptLines || transcriptLines.length === 0) {
+    showTranscriptStatus('Nothing to save yet.', 'warn');
+    return;
+  }
+
+  // Build filename: MeetAssist_YYYY-MM-DD_HH-MM.txt
+  const now      = new Date();
+  const date     = now.toISOString().slice(0, 10);                    // YYYY-MM-DD
+  const time     = now.toTimeString().slice(0, 5).replace(':', '-');  // HH-MM
+  const filename = `MeetAssist_${date}_${time}.txt`;
+
+  // Build file content — header + ISO-ish date + divider + timestamped lines
+  const header   = `MeetAssist Transcript\n`;
+  const dateLine = `Date: ${now.toDateString()} ${now.toTimeString().slice(0,8)}\n`;
+  const divider  = `${'─'.repeat(50)}\n\n`;
+
+  const lines = transcriptLines
+    .map(entry => {
+      const ts = entry.time instanceof Date
+        ? entry.time.toTimeString().slice(0, 8)
+        : '--:--:--';
+      return `[${ts}] ${entry.text}`;
+    })
+    .join('\n');
+
+  const content = header + dateLine + divider + lines + '\n';
+
+  // Disable button while saving
+  btnSaveTranscript.disabled = true;
+  btnSaveTranscript.textContent = '...';
+
+  try {
+    const result = await window.meetAPI.saveTranscript(filename, content);
+
+    if (result.canceled) {
+      showTranscriptStatus('Save cancelled.', 'warn');
+    } else if (result.success) {
+      // Show just the filename, not the full path
+      const saved = result.filePath.split(/[\\/]/).pop();
+      showTranscriptStatus(`Saved: ${saved}`, 'success');
+    } else {
+      showTranscriptStatus(`Save failed: ${result.error}`, 'error');
+    }
+  } catch (err) {
+    showTranscriptStatus(`Error: ${err.message}`, 'error');
+  } finally {
+    btnSaveTranscript.disabled = false;
+    btnSaveTranscript.textContent = 'Save';
+  }
+}
+
+// Block 5 — transient status banner inserted just below #transcript-header.
+// Auto-removes after 3 s; replaces any previous status on the next call.
+let statusTimer = null;
+
+function showTranscriptStatus(message, type = 'success') {
+  // Remove any existing status
+  const existing = document.getElementById('transcript-status');
+  if (existing) existing.remove();
+  if (statusTimer) clearTimeout(statusTimer);
+
+  const status = document.createElement('span');
+  status.id          = 'transcript-status';
+  status.className   = `transcript-status ${type}`;
+  status.textContent = message;
+
+  // Insert after the transcript-header div
+  const header = document.getElementById('transcript-header');
+  header.insertAdjacentElement('afterend', status);
+
+  // Auto-remove after 3 seconds
+  statusTimer = setTimeout(() => {
+    status.remove();
+    statusTimer = null;
+  }, 3000);
+}
 
 // ── Text selection → context bar (Block 3) ──────────────────────────────────
 // Block 3 — improved handler: dedupes on lastSelectedText so the same drag-

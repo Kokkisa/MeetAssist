@@ -432,3 +432,14 @@ select:focus { border-color: rgba(79,142,247,0.50); }
   color:     #ff6b6b;
   font-size: 12px;
 }
+
+/* ── BLOCK 5 — TRANSCRIPT SAVE STATUS BANNER ─────────── */
+.transcript-status {
+  display:     block;
+  font-size:   10px;
+  padding:     3px 10px;
+  flex-shrink: 0;
+}
+.transcript-status.success { color: #00c864; }
+.transcript-status.warn    { color: #f0a500; }
+.transcript-status.error   { color: #ff6b6b; }

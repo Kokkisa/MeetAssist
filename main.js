@@ -2,8 +2,9 @@
 const TOGGLE_HOTKEY = 'CommandOrControl+Shift+M'; // Show/hide overlay
 // ──────────────────────────────────────────────────────────────────────────────
 
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer, dialog } = require('electron');
 const path = require('path');
+const fs   = require('fs');
 
 let mainWindow = null;
 
@@ -76,6 +77,34 @@ ipcMain.on('win-minimise',() => { if (mainWindow) mainWindow.minimize(); });
 ipcMain.handle('get-desktop-sources', async () => {
   const sources = await desktopCapturer.getSources({ types: ['screen'] });
   return sources.map(s => ({ id: s.id, name: s.name }));
+});
+
+// Block 5 — Save transcript to disk via native save dialog.
+// Renderer hands us a default filename + already-formatted UTF-8 text body;
+// we show the dialog (so the user picks the target folder) and write the
+// file synchronously. Returns a {success, filePath} / {success:false,error}
+// / {success:false, canceled:true} envelope the renderer can render.
+ipcMain.handle('save-transcript', async (event, { filename, content }) => {
+  try {
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title:       'Save Transcript',
+      defaultPath: filename,
+      filters:     [
+        { name: 'Text Files', extensions: ['txt'] },
+        { name: 'All Files',  extensions: ['*']   }
+      ]
+    });
+
+    if (canceled || !filePath) {
+      return { success: false, canceled: true };
+    }
+
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { success: true, filePath };
+
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 // Quit when all windows closed (Windows/Linux)
