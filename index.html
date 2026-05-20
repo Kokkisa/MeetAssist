@@ -59,7 +59,15 @@
 
   <!-- ── CONTEXT BAR ────────────────────────────────────── -->
   <div id="context-bar">
-    <div class="panel-label">💬 Context &amp; Question</div>
+    <!-- Block 3 — archived 2026-05-19: replaced the lone panel-label with
+         a header row containing the panel-label + a Clear button.
+         Original line kept here for reference per archive rule:
+           <div class="panel-label">💬 Context &amp; Question</div>
+    -->
+    <div class="context-bar-header">
+      <div class="panel-label">💬 Context &amp; Question</div>
+      <button class="small-btn" id="btn-clear-context">Clear</button>
+    </div>
     <div id="selected-text-display" class="empty-state">
       Select text from transcript → it appears here
     </div>
@@ -76,7 +84,15 @@
 
   <!-- ── ANSWER PANEL ───────────────────────────────────── -->
   <div id="answer-panel">
-    <div class="panel-label">🤖 Answer</div>
+    <!-- Block 3 — archived 2026-05-19: replaced the lone panel-label with
+         a header row containing the panel-label + a Copy button.
+         Original line kept here for reference per archive rule:
+           <div class="panel-label">🤖 Answer</div>
+    -->
+    <div class="answer-header">
+      <div class="panel-label">🤖 Answer</div>
+      <button class="small-btn" id="btn-copy-answer" title="Copy answer">Copy</button>
+    </div>
     <div id="answer-body">
       <p class="placeholder-text">Your answer will appear here...</p>
     </div>

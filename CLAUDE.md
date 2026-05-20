@@ -1,498 +1,368 @@
-# CLAUDE.md — MeetAssist Block 2 (v0.2.0)
+# CLAUDE.md — MeetAssist Block 3 (v0.3.0)
 
 ## Context
 
-Block 1 is complete and pushed as v0.1.0.
-The overlay window works. All 6 files exist and are correct.
+Block 1 (v0.1.0) — Electron shell, overlay window, layout skeleton ✅
+Block 2 (v0.2.0) — System audio capture, Whisper transcription, live transcript ✅
 Repo: https://github.com/Kokkisa/MeetAssist
+Current commit: 40c6d4c
 
 Read ALL existing source files before touching anything.
-Build Block 2 features on top of Block 1. Do NOT rewrite or restructure Block 1 code.
+Build Block 3 features on top of Block 2. Do NOT rewrite or restructure anything.
+
+## ARCHIVE RULE (mandatory)
+Never delete working code. Comment it out with reason and date.
+Always commit a WIP state before trying alternative approaches.
 
 ---
 
-## Block 2 Goal
+## Block 3 Goal
 
-Capture system audio (what the user hears — Zoom/Meet output) continuously.
-Chunk it every 5 seconds and send to OpenAI Whisper for transcription.
-Append each transcribed chunk as a new line in the transcript panel.
-Add a Start/Stop recording button to the header.
+Three features, in order:
 
-Block 2 is done when:
-- User clicks Start → app begins capturing system audio
-- Every ~5 seconds a new transcript line appears in the transcript panel
-- User clicks Stop → capture ends, transcript stays on screen
-- All data persists in memory during the session (no disk write yet — that is Block 6)
-- Committed and pushed as v0.2.0
+1. **Text selection → context bar** — when user selects any text in the
+   transcript panel, it auto-populates the context display in the context bar
+
+2. **Manual context editing** — user can edit the selected text in the
+   context bar before asking, and can clear it
+
+3. **AI answer on demand** — when user clicks Ask (or presses Enter),
+   the selected context + question is sent to GPT-4o and the answer
+   streams into the answer panel
+
+Block 3 is done when:
+- User selects transcript text → appears in context bar automatically
+- User types a question → clicks Ask or presses Enter
+- Answer streams word by word into the answer panel
+- Multiple rounds work (ask again with new selection)
+- Committed and pushed as v0.3.0
 
 ---
 
-## Architecture
+## Feature 1 — Text Selection → Context Bar
 
+### How it works
+The transcript panel (`#transcript-body`) contains `.transcript-line` paragraphs.
+When the user selects text anywhere inside `#transcript-body` and releases
+the mouse, capture the selected text and populate `#selected-text-display`.
+
+### Current state of context bar in index.html
+The Block 1/2 HTML already has:
+- `#selected-text-display` — shows selected text (currently placeholder text)
+- `#question-input` — user types their question
+- `#btn-ask` — triggers the AI call
+
+Block 2 renderer.js already has a basic mouseup handler for this.
+READ the existing handler first — do NOT duplicate it. Extend or replace it cleanly.
+
+### Improved selection handler (replace existing mouseup handler in renderer.js):
+
+```javascript
+// ── Text selection → context bar ─────────────────────────────────────────────
+let lastSelectedText = '';
+
+document.addEventListener('mouseup', () => {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return;
+
+  const range = selection.getRangeAt(0);
+
+  // Only capture selections inside transcript-body
+  if (!transcriptBody.contains(range.commonAncestorContainer)) return;
+
+  const selectedText = selection.toString().trim();
+  if (!selectedText || selectedText === lastSelectedText) return;
+
+  lastSelectedText = selectedText;
+  setContextText(selectedText);
+});
+
+function setContextText(text) {
+  selectedTextDisplay.textContent = text;
+  selectedTextDisplay.classList.remove('empty-state');
+  selectedTextDisplay.classList.add('has-content');
+  // Focus question input so user can type immediately
+  questionInput.focus();
+}
+
+function clearContext() {
+  lastSelectedText = '';
+  selectedTextDisplay.textContent = 'Select text from transcript → it appears here';
+  selectedTextDisplay.classList.add('empty-state');
+  selectedTextDisplay.classList.remove('has-content');
+}
 ```
-System Audio (WASAPI loopback)
-    ↓
-desktopCapturer (Electron main process)
-    ↓ IPC (audio-chunk ArrayBuffer)
-renderer process
-    ↓
-OpenAI Whisper API (audio/transcriptions)
-    ↓
-Append line to #transcript-body
-```
 
-All audio capture happens in the RENDERER process using the Web Audio API
-via desktopCapturer — same proven pattern as LiveCallAssistant v0.1.0.
-Do NOT use native modules. Do NOT use node-record-lpcm16 or any npm audio package.
+### Add a Clear button to context bar (index.html)
 
----
-
-## Step 1 — Add OpenAI API key setting (stored in localStorage)
-
-MeetAssist needs the user's OpenAI API key for Whisper.
-Store it in localStorage. Add a simple settings toggle to the header.
-
-### Add to index.html — settings row below header:
+In the context bar section, add a small Clear button next to the panel label:
 
 ```html
-<!-- Settings bar — collapsible, hidden by default -->
-<div id="settings-bar" class="hidden">
-  <div class="settings-row">
-    <label for="input-api-key">OpenAI API Key</label>
-    <input type="password" id="input-api-key" placeholder="sk-..." autocomplete="off" />
-    <button id="btn-save-settings">Save</button>
-  </div>
+<div class="context-bar-header">
+  <div class="panel-label">💬 Context &amp; Question</div>
+  <button class="small-btn" id="btn-clear-context">Clear</button>
 </div>
 ```
 
-Add a ⚙ settings button to the existing #win-controls in the header:
-```html
-<button class="ctrl-btn" id="btn-settings" title="Settings">⚙</button>
-```
-Place it BEFORE the minimise button.
+Replace the existing lone `<div class="panel-label">` line in #context-bar with this.
 
-### CSS for settings bar (add to styles.css):
+### CSS for context-bar-header (add to styles.css):
 
 ```css
-#settings-bar {
-  background:   rgba(15, 15, 25, 0.95);
-  border-top:   1px solid var(--border);
-  padding:      8px 10px;
-  flex-shrink:  0;
+.context-bar-header {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding-right:   10px;
 }
-#settings-bar.hidden { display: none; }
+```
 
-.settings-row {
-  display:     flex;
-  align-items: center;
-  gap:         8px;
-}
-.settings-row label {
-  font-size:   11px;
-  color:       var(--text-secondary);
-  white-space: nowrap;
-}
-.settings-row input {
-  flex:          1;
-  background:    var(--bg-input);
-  border:        1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color:         var(--text-primary);
-  font-size:     11px;
-  padding:       4px 8px;
-  outline:       none;
-}
-.settings-row input:focus { border-color: rgba(79,142,247,0.50); }
-#btn-save-settings {
-  background:    var(--bg-btn);
-  border:        none;
-  border-radius: var(--radius-sm);
-  color:         #fff;
-  font-size:     11px;
-  padding:       4px 10px;
-  cursor:        pointer;
-}
-#btn-save-settings:hover { background: var(--bg-btn-hover); }
+### Wire the clear button in renderer.js:
+
+```javascript
+const btnClearContext = document.getElementById('btn-clear-context');
+btnClearContext.addEventListener('click', clearContext);
 ```
 
 ---
 
-## Step 2 — Add Start/Stop button to header
+## Feature 2 — AI Answer Streaming
 
-In index.html, add to #header between #app-name and #win-controls:
+### Settings addition — store model preference
 
-```html
-<div id="record-controls">
-  <div id="rec-indicator" class="hidden">
-    <span class="rec-dot"></span>
-    <span id="rec-timer">00:00</span>
-  </div>
-  <button id="btn-start-stop" class="start-btn">▶ Start</button>
-</div>
+Add to localStorage keys:
+```javascript
+const STORAGE_KEY_MODEL = 'meetassist_model'; // 'gpt-4o' or 'gpt-4o-mini'
 ```
 
-### CSS (add to styles.css):
+No UI for model selector in Block 3 — default to `gpt-4o-mini` for speed and cost.
+User can change in Block 4 settings expansion.
 
-```css
-#record-controls {
-  display:     flex;
-  align-items: center;
-  gap:         8px;
-  -webkit-app-region: no-drag;
-}
-.start-btn {
-  background:    rgba(0, 200, 100, 0.20);
-  border:        1px solid rgba(0, 200, 100, 0.40);
-  border-radius: 12px;
-  color:         #00c864;
-  font-size:     11px;
-  font-weight:   600;
-  padding:       4px 12px;
-  cursor:        pointer;
-  transition:    all 0.15s;
-}
-.start-btn:hover  { background: rgba(0, 200, 100, 0.35); }
-.start-btn.active {
-  background: rgba(255, 60, 60, 0.20);
-  border-color: rgba(255, 60, 60, 0.40);
-  color: #ff4f4f;
-}
-#rec-indicator {
-  display:     flex;
-  align-items: center;
-  gap:         5px;
-}
-#rec-indicator.hidden { display: none; }
-.rec-dot {
-  width:         7px;
-  height:        7px;
-  border-radius: 50%;
-  background:    #ff4f4f;
-  animation:     pulse 1.2s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.3; }
-}
-#rec-timer {
-  font-size:   10px;
-  color:       var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-```
+### The ask flow
 
----
+When user clicks Ask or presses Enter in `#question-input`:
 
-## Step 3 — Audio capture in renderer.js
+1. Read context from `#selected-text-display` (if has-content class)
+2. Read question from `#question-input`
+3. Validate — at least one of context or question must be non-empty
+4. Build messages array for GPT-4o
+5. Stream response into `#answer-body`
+6. Clear question input after submit
+7. Keep context — user may want to ask follow-up on same selection
 
-This is the core of Block 2. Add the following to renderer.js.
-
-### 3A — New DOM refs (add after existing refs):
+### System prompt for MeetAssist:
 
 ```javascript
-const btnStartStop   = document.getElementById('btn-start-stop');
-const btnSettings    = document.getElementById('btn-settings');
-const settingsBar    = document.getElementById('settings-bar');
-const inputApiKey    = document.getElementById('input-api-key');
-const btnSaveSettings= document.getElementById('btn-save-settings');
-const recIndicator   = document.getElementById('rec-indicator');
-const recTimerEl     = document.getElementById('rec-timer');
+const SYSTEM_PROMPT = `You are MeetAssist, a real-time meeting assistant.
+The user is in a live meeting (Zoom, Google Meet, Teams, etc).
+You are given a transcript excerpt from the meeting and a question about it.
+
+Your job:
+- Answer the question clearly and concisely based on the transcript context
+- If no context is provided, answer the question from general knowledge
+- Keep answers brief (2-4 sentences) unless the question requires more detail
+- Use plain text — no markdown, no bullet points, no headers
+- If asked to summarize, give a 3-5 sentence summary
+- If asked for action items, list them as plain numbered items
+- Never say "based on the transcript" — just answer directly
+
+The user may be reading your answer while on a live call, so be fast and clear.`;
 ```
 
-### 3B — State variables (add after existing state):
+### buildMessages function:
 
 ```javascript
-// Recording state
-let isRecording      = false;
-let mediaStream      = null;
-let mediaRecorder    = null;
-let audioChunks      = [];
-let chunkTimer       = null;
-let recTimerInterval = null;
-let recSeconds       = 0;
-let transcriptLines  = [];   // full session transcript in memory
-```
+function buildMessages(contextText, question) {
+  const hasContext = contextText &&
+    !selectedTextDisplay.classList.contains('empty-state');
 
-### 3C — Settings (add after state variables):
+  let userContent = '';
 
-```javascript
-// Load saved API key on startup
-const STORAGE_KEY_APIKEY = 'meetassist_openai_key';
-
-function getApiKey() {
-  return localStorage.getItem(STORAGE_KEY_APIKEY) || '';
-}
-
-function loadSettings() {
-  inputApiKey.value = getApiKey();
-}
-
-function saveSettings() {
-  const key = inputApiKey.value.trim();
-  if (!key) return;
-  localStorage.setItem(STORAGE_KEY_APIKEY, key);
-  settingsBar.classList.add('hidden');
-}
-
-// Wire settings button
-btnSettings.addEventListener('click', () => {
-  settingsBar.classList.toggle('hidden');
-  if (!settingsBar.classList.contains('hidden')) {
-    inputApiKey.focus();
+  if (hasContext && question) {
+    userContent = `Transcript excerpt:\n"${contextText}"\n\nQuestion: ${question}`;
+  } else if (hasContext && !question) {
+    userContent = `Transcript excerpt:\n"${contextText}"\n\nPlease summarize this.`;
+  } else if (!hasContext && question) {
+    userContent = question;
+  } else {
+    return null; // nothing to send
   }
-});
 
-btnSaveSettings.addEventListener('click', saveSettings);
-inputApiKey.addEventListener('keydown', e => {
-  if (e.key === 'Enter') saveSettings();
-});
-
-loadSettings();
-```
-
-### 3D — Recording timer:
-
-```javascript
-function startRecTimer() {
-  recSeconds = 0;
-  recTimerEl.textContent = '00:00';
-  recTimerInterval = setInterval(() => {
-    recSeconds++;
-    const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
-    const s = String(recSeconds % 60).padStart(2, '0');
-    recTimerEl.textContent = `${m}:${s}`;
-  }, 1000);
-}
-
-function stopRecTimer() {
-  clearInterval(recTimerInterval);
-  recTimerInterval = null;
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user',   content: userContent }
+  ];
 }
 ```
 
-### 3E — Whisper transcription call:
+### streamAnswer function (SSE streaming):
 
 ```javascript
-async function transcribeChunk(audioBlob) {
+async function streamAnswer(messages) {
   const apiKey = getApiKey();
   if (!apiKey) {
-    appendTranscriptLine('[No API key — add it in Settings ⚙]');
+    showAnswerError('No API key — add it in Settings ⚙');
     return;
   }
 
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'chunk.webm');
-  formData.append('model', 'whisper-1');
-  formData.append('language', 'en');
+  // Show loading state
+  answerBody.innerHTML = '<p class="answer-streaming">thinking...</p>';
+  btnAsk.disabled = true;
+  btnAsk.textContent = '...';
+
+  let fullText = '';
 
   try {
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method:  'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      body:    formData
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model:       localStorage.getItem(STORAGE_KEY_MODEL) || 'gpt-4o-mini',
+        messages:    messages,
+        max_tokens:  500,
+        stream:      true,
+        temperature: 0.3
+      })
     });
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      appendTranscriptLine(`[Whisper error: ${err?.error?.message || response.status}]`);
+      showAnswerError(`API error: ${err?.error?.message || response.status}`);
       return;
     }
 
-    const data = await response.json();
-    const text = data.text?.trim();
+    // Stream SSE response
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    answerBody.innerHTML = '';
 
-    // Skip empty or noise-only chunks
-    if (text && text.length > 1) {
-      appendTranscriptLine(text);
-    }
+    const answerEl = document.createElement('p');
+    answerEl.className = 'answer-text';
+    answerBody.appendChild(answerEl);
 
-  } catch (err) {
-    appendTranscriptLine(`[Network error: ${err.message}]`);
-  }
-}
-```
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-### 3F — Append transcript line:
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
 
-```javascript
-function appendTranscriptLine(text) {
-  // Remove placeholder if present
-  const placeholder = transcriptBody.querySelector('.placeholder-text');
-  if (placeholder) placeholder.remove();
+      for (const line of lines) {
+        const data = line.slice(6); // remove 'data: '
+        if (data === '[DONE]') break;
 
-  // Add to in-memory array
-  transcriptLines.push({ text, time: new Date() });
-
-  // Create DOM element
-  const line = document.createElement('p');
-  line.className = 'transcript-line';
-  line.textContent = text;
-  transcriptBody.appendChild(line);
-
-  // Auto-scroll to bottom
-  transcriptBody.scrollTop = transcriptBody.scrollHeight;
-}
-```
-
-Add to styles.css:
-```css
-.transcript-line {
-  padding:       2px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  margin-bottom: 3px;
-  font-size:     12px;
-  line-height:   1.6;
-  color:         var(--text-primary);
-  user-select:   text;   /* allow text selection for context bar */
-}
-```
-
-### 3G — Audio capture and chunking:
-
-```javascript
-async function startRecording() {
-  if (isRecording) return;
-
-  // Get system audio via desktopCapturer (loopback)
-  // On Windows this captures all system audio output including Zoom/Meet
-  try {
-    // Request screen + audio — the audio track is the system loopback
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          chromeMediaSource:   'desktop',
-          chromeMediaSourceId: 'screen:0:0',  // default primary screen
+        try {
+          const parsed = JSON.parse(data);
+          const delta  = parsed.choices?.[0]?.delta?.content || '';
+          fullText += delta;
+          answerEl.textContent = fullText;
+          // Auto-scroll answer panel
+          answerBody.scrollTop = answerBody.scrollHeight;
+        } catch {
+          // Skip malformed SSE chunks
         }
-      },
-      video: false
-    });
+      }
+    }
+
   } catch (err) {
-    appendTranscriptLine(`[Audio capture failed: ${err.message}]`);
-    return;
+    showAnswerError(`Network error: ${err.message}`);
+  } finally {
+    btnAsk.disabled = false;
+    btnAsk.textContent = 'Ask';
   }
-
-  // Check we got an audio track
-  const audioTracks = mediaStream.getAudioTracks();
-  if (!audioTracks.length) {
-    appendTranscriptLine('[No audio track available — check Windows audio settings]');
-    return;
-  }
-
-  isRecording = true;
-  btnStartStop.textContent = '■ Stop';
-  btnStartStop.classList.add('active');
-  recIndicator.classList.remove('hidden');
-  startRecTimer();
-
-  // Use MediaRecorder to collect chunks
-  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
-
-  mediaRecorder.ondataavailable = e => {
-    if (e.data && e.data.size > 0) audioChunks.push(e.data);
-  };
-
-  // Every 5 seconds: stop current recorder, transcribe, restart
-  async function flushChunk() {
-    if (!isRecording) return;
-
-    mediaRecorder.stop();
-    await new Promise(res => mediaRecorder.onstop = res);
-
-    if (audioChunks.length) {
-      const blob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
-      audioChunks = [];
-      transcribeChunk(blob); // fire and forget — don't await, keep recording
-    }
-
-    if (isRecording) {
-      // Restart recorder on same stream
-      mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
-      mediaRecorder.ondataavailable = e => {
-        if (e.data && e.data.size > 0) audioChunks.push(e.data);
-      };
-      mediaRecorder.start();
-      chunkTimer = setTimeout(flushChunk, 5000);
-    }
-  }
-
-  mediaRecorder.start();
-  chunkTimer = setTimeout(flushChunk, 5000);
 }
 
-function stopRecording() {
-  if (!isRecording) return;
-  isRecording = false;
-
-  clearTimeout(chunkTimer);
-  stopRecTimer();
-
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(t => t.stop());
-    mediaStream = null;
-  }
-
-  btnStartStop.textContent = '▶ Start';
-  btnStartStop.classList.remove('active');
-  recIndicator.classList.add('hidden');
-
-  appendTranscriptLine('── Recording stopped ──');
+function showAnswerError(msg) {
+  answerBody.innerHTML = `<p class="answer-error">${msg}</p>`;
+  btnAsk.disabled = false;
+  btnAsk.textContent = 'Ask';
 }
 ```
 
-### 3H — Wire Start/Stop button:
+### handleAsk function (replace existing placeholder):
+
+Find the existing `handleAsk()` function in renderer.js and replace it entirely:
 
 ```javascript
-btnStartStop.addEventListener('click', () => {
-  if (isRecording) {
-    stopRecording();
-  } else {
-    startRecording();
+function handleAsk() {
+  const contextText = selectedTextDisplay.textContent.trim();
+  const question    = questionInput.value.trim();
+
+  const messages = buildMessages(contextText, question);
+  if (!messages) {
+    // Flash the context bar to indicate nothing to send
+    selectedTextDisplay.style.borderColor = 'rgba(255,80,80,0.6)';
+    setTimeout(() => {
+      selectedTextDisplay.style.borderColor = '';
+    }, 800);
+    return;
   }
-});
+
+  questionInput.value = '';
+  streamAnswer(messages);
+}
 ```
 
-### 3I — Update Clear transcript to also reset in-memory array:
+### CSS additions for answer panel (add to styles.css):
 
-Find the existing btnClearTranscript handler and replace it:
-```javascript
-btnClearTranscript.addEventListener('click', () => {
-  transcriptLines = [];
-  transcriptBody.innerHTML = '<p class="placeholder-text">Transcript cleared.</p>';
-});
+```css
+.answer-text {
+  color:       var(--text-primary);
+  font-size:   12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.answer-streaming {
+  color:      var(--text-secondary);
+  font-style: italic;
+  font-size:  12px;
+  animation:  pulse-opacity 1s ease-in-out infinite;
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.answer-error {
+  color:     #ff6b6b;
+  font-size: 12px;
+}
+
+/* Answer panel label row with copy button */
+.answer-header {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  padding-right:   10px;
+}
 ```
 
----
+### Add Copy button to answer panel header (index.html):
 
-## Step 4 — Update CSP in index.html
-
-The existing CSP blocks fetch() calls to OpenAI. Update the meta tag:
+Replace the existing lone `<div class="panel-label">🤖 Answer</div>` in #answer-panel:
 
 ```html
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'self';
-               script-src 'self';
-               style-src 'self' 'unsafe-inline';
-               connect-src https://api.openai.com;">
+<div class="answer-header">
+  <div class="panel-label">🤖 Answer</div>
+  <button class="small-btn" id="btn-copy-answer" title="Copy answer">Copy</button>
+</div>
 ```
 
----
-
-## Step 5 — Update main.js for audio permissions
-
-Electron requires explicit permission for audio capture.
-Add this to createWindow() AFTER mainWindow is created:
-
+Wire in renderer.js:
 ```javascript
-// Grant audio/media permissions for system loopback capture
-mainWindow.webContents.session.setPermissionRequestHandler(
-  (webContents, permission, callback) => {
-    const allowed = ['media', 'audioCapture', 'desktopCapture'];
-    callback(allowed.includes(permission));
-  }
-);
+const btnCopyAnswer = document.getElementById('btn-copy-answer');
+btnCopyAnswer.addEventListener('click', () => {
+  const text = answerBody.innerText.trim();
+  if (!text || text === 'Your answer will appear here...') return;
+  navigator.clipboard.writeText(text);
+  btnCopyAnswer.textContent = 'Copied!';
+  setTimeout(() => btnCopyAnswer.textContent = 'Copy', 2000);
+});
 ```
 
 ---
@@ -501,27 +371,58 @@ mainWindow.webContents.session.setPermissionRequestHandler(
 
 | Scenario | Handling |
 |---|---|
-| No API key set | Show message in transcript: [No API key — add in Settings] |
-| Whisper returns empty | Skip silently — don't append blank line |
-| Audio chunk too short (<0.5s) | Skip transcription — Whisper returns noise |
-| Network error | Append error line, keep recording |
-| User clicks Stop mid-chunk | Flush last chunk before stopping |
-| MediaRecorder mimeType not supported | Fallback to 'audio/webm' without codec spec |
+| User clicks Ask with no context and no question | Flash red border on context bar, do nothing |
+| User clicks Ask with only context, no question | Auto-summarize the context |
+| User clicks Ask with only question, no context | Answer from general knowledge |
+| API key missing | Show error in answer panel |
+| Network error mid-stream | Show error, re-enable Ask button |
+| User clicks Ask while answer is streaming | Disabled until stream completes |
+| Very long context (>2000 chars) | Truncate to first 2000 chars, append "..." |
+
+Add truncation to buildMessages:
+```javascript
+const MAX_CONTEXT = 2000;
+if (hasContext && contextText.length > MAX_CONTEXT) {
+  contextText = contextText.slice(0, MAX_CONTEXT) + '...';
+}
+```
 
 ---
 
-## Definition of done — Block 2
+## Files to modify
 
-- [ ] ⚙ settings button shows/hides settings bar
-- [ ] API key saves to localStorage on Save or Enter
-- [ ] ▶ Start button begins audio capture
-- [ ] Recording indicator (pulsing red dot + timer) shows while recording
-- [ ] Transcript lines appear every ~5 seconds from Whisper
-- [ ] ■ Stop button ends capture cleanly
-- [ ] Clear button resets both DOM and transcriptLines array
-- [ ] No audio packages installed — uses Web Audio API only
-- [ ] Committed and pushed as v0.2.0
+| File | Changes |
+|---|---|
+| renderer.js | Replace mouseup handler, add setContextText/clearContext, add buildMessages, add streamAnswer, add showAnswerError, replace handleAsk, add btnClearContext + btnCopyAnswer refs and handlers, add SYSTEM_PROMPT and STORAGE_KEY_MODEL constants |
+| index.html | Add context-bar-header div with Clear button, add answer-header div with Copy button, update CSP (already has connect-src api.openai.com from Block 2) |
+| styles.css | Add .context-bar-header, .answer-text, .answer-streaming, .answer-error, .answer-header |
 
-## What Block 3 will add
-Text selection from transcript → context bar (auto-populate selected text),
-and manual context editing before asking the AI.
+DO NOT create new files.
+DO NOT touch main.js or preload.js — no changes needed.
+DO NOT touch any audio capture or transcription code.
+
+---
+
+## Pre-ship checklist (do NOT do this now — only before final release)
+- [ ] Re-enable setContentProtection(true) in main.js
+- [ ] Comment out openDevTools in main.js
+
+---
+
+## Definition of done — Block 3
+
+- [ ] Selecting text in transcript → populates context bar automatically
+- [ ] Clear button resets context bar
+- [ ] Ask with context + question → streams answer
+- [ ] Ask with context only → auto-summarizes
+- [ ] Ask with question only → answers from general knowledge
+- [ ] Copy button copies answer to clipboard
+- [ ] Ask button disabled during streaming
+- [ ] Multiple rounds work without refresh
+- [ ] No changes to audio/transcription code
+- [ ] Committed and pushed as v0.3.0
+
+## What Block 4 will add
+Settings expansion (model selector, language, chunk size),
+transcript timestamps, speaker labels placeholder,
+and session save to disk.
